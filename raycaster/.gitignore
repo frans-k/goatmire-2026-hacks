@@ -1,0 +1,17 @@
+# The directory Mix will write compiled artifacts to.
+/_build/
+
+# The directory Mix downloads your dependencies sources to.
+/deps/
+
+# Temporary files, for example scratch scripts.
+/tmp/
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# AtomVM packed application
+/*.avm
+
+# AtomVM firmware images downloaded by mix atomvm.esp32.install
+/firmware_images/
