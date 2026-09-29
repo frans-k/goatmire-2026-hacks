@@ -69,6 +69,9 @@ defmodule Raycaster.Engine do
   # How close to a wall the player may get, in Q8.
   @radius 60
 
+  # Pasted into columns/4 by the compiler, saving a call per column.
+  @compile {:inline, colour: 3, rgb: 1}
+
   def new, do: %{x: 384, y: 384, a: 0}
 
   # The map. Call this once and pass the result to step/4 and frame/4.
@@ -110,6 +113,19 @@ defmodule Raycaster.Engine do
     plane_y = div(dir_x * 169, 256)
     column_width = div(width, @cols)
 
+    # Every ray starts from the same cell, so where the player stands is worked
+    # out once here. The cell is its place in the grid tuple, counted from 1 as
+    # :erlang.element/2 does (elem/2 counts from 0 and adds the 1 on every
+    # read), and in_x, in_y are how far into that cell the player is.
+    cell = (y >>> 8) * @size + (x >>> 8) + 1
+    in_x = x &&& 255
+    in_y = y &&& 255
+
+    # What every column needs and none changes, in one tuple: a call only has
+    # to keep a few variables alive across it, and each one costs a save and a
+    # restore on this chip.
+    view = {grid, cell, in_x, in_y, dir_x, dir_y, plane_x, plane_y, column_width, height}
+
     # The first item is on top, so floor and ceiling go last, behind the walls.
     # The walls are put in front of them as they are found.
     behind = [
@@ -117,19 +133,21 @@ defmodule Raycaster.Engine do
       {:rect, 0, 0, width, div(height, 2), @ceiling}
     ]
 
-    columns(grid, 0, x, y, dir_x, dir_y, plane_x, plane_y, column_width, height, nil, behind)
+    columns(view, 0, nil, behind)
   end
 
   # `run` is the rectangle being widened: neighbouring columns with the same
   # height and colour (a flat wall facing you) become one rectangle.
-  defp columns(_grid, @cols, _x, _y, _dx, _dy, _px, _py, _w, _h, run, acc), do: emit(run, acc)
+  defp columns(_view, @cols, run, acc), do: emit(run, acc)
 
-  defp columns(grid, i, x, y, dir_x, dir_y, plane_x, plane_y, column_width, height, run, acc) do
+  defp columns(view, i, run, acc) do
+    {grid, cell, in_x, in_y, dir_x, dir_y, plane_x, plane_y, column_width, height} = view
+
     camera = div(2 * i * 256, @cols) - 256
     ray_x = dir_x + div(plane_x * camera, 256)
     ray_y = dir_y + div(plane_y * camera, 256)
 
-    {wall, side, dist} = cast(grid, x, y, ray_x, ray_y)
+    {wall, side, dist} = cast(grid, cell, in_x, in_y, ray_x, ray_y)
     line = min(div(height * 256, max(dist, 1)), height)
     top = div(height - line, 2)
     colour = colour(wall, side, dist)
@@ -140,7 +158,7 @@ defmodule Raycaster.Engine do
         _ -> {{i * column_width, column_width, top, line, colour}, emit(run, acc)}
       end
 
-    columns(grid, i + 1, x, y, dir_x, dir_y, plane_x, plane_y, column_width, height, run, acc)
+    columns(view, i + 1, run, acc)
   end
 
   defp emit(nil, acc), do: acc
@@ -148,40 +166,43 @@ defmodule Raycaster.Engine do
 
   # Digital differential analysis: hop from grid line to grid line along the
   # ray until a wall cell is entered. Returns {wall type, side hit, distance}.
-  defp cast(grid, x, y, ray_x, ray_y) do
-    map_x = x >>> 8
-    map_y = y >>> 8
+  #
+  # Per axis: delta is how far along the ray one whole cell is, and side how
+  # far the first grid line is (the rest of the cell, as a fraction of a whole
+  # one, times delta). A ray that never crosses that axis's lines gets @far for
+  # both. Written as plain ifs rather than a helper returning a tuple, which
+  # cost a call and a tuple for each axis of each ray.
+  defp cast(grid, cell, in_x, in_y, ray_x, ray_y) do
+    delta_x = if ray_x == 0, do: @far, else: div(65_536, abs(ray_x))
+    delta_y = if ray_y == 0, do: @far, else: div(65_536, abs(ray_y))
 
-    {delta_x, step_x, side_x} = axis_setup(x, map_x, ray_x)
-    {delta_y, step_y, side_y} = axis_setup(y, map_y, ray_y)
+    side_x =
+      cond do
+        ray_x < 0 -> div(in_x * delta_x, 256)
+        ray_x == 0 -> @far
+        true -> div((256 - in_x) * delta_x, 256)
+      end
 
-    # The cell is tracked as its place in the grid tuple, so a step across a
-    # vertical grid line is +-1 and across a horizontal one +-@size. Counted
-    # from 1, as :erlang.element/2 does: elem/2 counts from 0 and adds the 1 on
-    # every read.
-    cell = map_y * @size + map_x + 1
-    march(grid, cell, side_x, side_y, delta_x, delta_y, step_x, step_y * @size)
+    side_y =
+      cond do
+        ray_y < 0 -> div(in_y * delta_y, 256)
+        ray_y == 0 -> @far
+        true -> div((256 - in_y) * delta_y, 256)
+      end
+
+    # A step across a vertical grid line moves one place in the grid tuple,
+    # across a horizontal one a whole row.
+    step_x = if ray_x < 0, do: -1, else: 1
+    step_y = if ray_y < 0, do: -@size, else: @size
+
+    march(grid, cell, side_x, side_y, delta_x, delta_y, step_x, step_y)
   end
 
-  defp axis_setup(_pos, _cell, 0), do: {@far, 1, @far}
-
-  defp axis_setup(pos, cell, ray) do
-    delta = div(65_536, abs(ray))
-
-    # How far along the ray the first grid line is: the rest of the cell, as a
-    # fraction of a whole cell, times the length of a whole cell.
-    if ray < 0 do
-      {delta, -1, div((pos - (cell <<< 8)) * delta, 256)}
-    else
-      {delta, 1, div((((cell + 1) <<< 8) - pos) * delta, 256)}
-    end
-  end
-
-  # The inner loop, run for every grid line every ray crosses: nearly all of
-  # the frame time. Kept to a comparison, two additions and a tuple read per
-  # step: 6 BEAM instructions, where it was about 37 with the bounds checked
-  # cell/3 call and a step counter. There is no bounds check and no step limit, because the map's outer
-  # wall stops every ray.
+  # The inner loop, run for every grid line every ray crosses. Kept to a
+  # comparison, two additions and a tuple read per step: 6 BEAM instructions,
+  # where it was about 37 with the bounds checked cell/3 call and a step
+  # counter. There is no bounds check and no step limit, because the map's
+  # outer wall stops every ray.
   defp march(grid, cell, side_x, side_y, delta_x, delta_y, step_x, step_y) do
     if side_x < side_y do
       cell = cell + step_x

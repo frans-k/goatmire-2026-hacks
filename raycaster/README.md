@@ -115,6 +115,25 @@ scanning shows up there.
 `Engine.step/4` also costs 3.2 ms a frame standing still and about 6 ms
 walking, mostly the key lists it reads as literals.
 
+### After trimming the work per column
+
+Once a ray step was 6 instructions, the steps stopped mattering: the tour
+averages 168 of them a frame, about 4 per column. Setting up each column was
+the rest, so that was trimmed next, again drawing exactly the same frames.
+
+| | fixed tour |
+|---|---|
+| Before any of this | 41.8 ms |
+| Ray loop shortened | 27.0 ms |
+| `cast` and `colour` inlined into the column loop | 23.7 ms |
+| Per frame constants in one tuple, start cell worked out once, no tuple per axis | 21.0 ms |
+
+The bench also asks how many schedulers AtomVM runs: 2, one per core. Drawing
+the tour twice took 336 ms in one process and 224 ms split across two, so a
+second process casting half the columns would give about 1.5 times, not 2.
+With two schedulers the keyboard scan could have run on the other core, yet
+walking still halved the frame rate, so something in the scan holds up both.
+
 ## Why not real Doom?
 
 The question this started from: how do people run Doom on odd hardware, and can
@@ -165,11 +184,9 @@ Done, and measured above (the fixed tour went from 41.8 to 27.0 ms a frame):
 
 Next:
 
-- The per column work is now the bigger share. Setting up a column (the
-  12 argument `columns`, `cast`, two `axis_setup` and `colour`) is about 150
-  instructions, mostly saving and restoring registers around the calls, against
-  6 per ray step. Fewer calls and fewer live variables per column is the next
-  thing to try.
+- The column setup was trimmed (21.0 ms a frame, see above). What is left per
+  column is mostly the arithmetic itself; a table of shaded colours passed in
+  like the map would save the shading, perhaps 10%.
 - The keyboard scan takes about half the chip while a key is held (see above).
   Scanning less often, only the rows with game keys, or with less work per row
   would give it back. Left for now, because the input may change.
@@ -177,10 +194,10 @@ Next:
   literals.
 - The fps line reads "0 fps" standing still: one frame in just over a second
   rounds down.
-- Overlap the display push with casting the next frame, and find out whether
-  AtomVM runs two schedulers on this dual core chip
-  (`:erlang.system_info(:schedulers_online)`). If it does, cast the two halves
-  of the screen in two processes.
+- Cast the two halves of the screen in two processes: AtomVM runs two
+  schedulers here, and the bench shows about 1.5 times for two processes.
+  Runs that meet in the middle have to be joined to keep the same picture.
+- Overlap the display push with casting the next frame.
 - Draw at 40 columns while moving and 80 while standing still. `@cols` is a
   module attribute today, so it would have to become an argument.
 
