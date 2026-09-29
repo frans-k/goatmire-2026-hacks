@@ -49,10 +49,12 @@ Everything is integers. Positions are Q8 fixed point (256 is one map cell),
 angles are 65536 to a turn, and the sine table is built while compiling on the
 laptop.
 
-`lib/scene.ex` pushes whatever list it is handed. The game loop asks with a
-`GenServer.call`, and [avm_scene](https://github.com/atomvm/avm_scene) answers
-only after the display has taken the list, so the loop can never run ahead of the
-screen and the call time is the display time.
+`lib/scene.ex` pushes whatever list it is handed. A small process in
+`lib/raycaster.ex` hands it each frame with a `GenServer.call`, which
+[avm_scene](https://github.com/atomvm/avm_scene) answers only after the display
+has taken the list. The game casts the next frame meanwhile, and waits for that
+answer before sending another, so it can never run more than one frame ahead of
+the screen.
 
 ## What I measured on the badge
 
