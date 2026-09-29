@@ -202,7 +202,7 @@ defmodule Raycaster.Engine do
   defp figures(_view, [], acc), do: acc
 
   defp figures(view, [{ox, oy, colour} | rest], acc) do
-    {grid, x, y, dir_x, dir_y, plane_x, plane_y, det, width, height} = view
+    {_grid, x, y, dir_x, dir_y, plane_x, plane_y, det, _width, _height} = view
 
     rel_x = ox - x
     rel_y = oy - y

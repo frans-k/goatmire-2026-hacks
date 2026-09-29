@@ -13,21 +13,21 @@ defmodule Raycaster do
   With no key held and the view already on screen, it draws nothing and waits
   for a key, redrawing once a second only to update that line.
 
-  With wifi credentials in `config/config_local.exs` it also joins an MQTT broker,
-  tells the other badges where it is and draws them as coloured figures, see
-  `Raycaster.Wire`. Without them it is a room to walk around in alone, and the
-  game starts at once either way: wifi is joined in a process of its own.
+  Built with `RAYCASTER_RELAY=wss://host` and wifi credentials in
+  `config/config_local.exs` it also joins the relay server (see `../relay`), which
+  puts it in a room of at most eight, tells it where the others are once a second,
+  and is told where it is. The others are drawn as coloured figures. Without them
+  it is a room to walk around in alone, and the game starts at once either way:
+  wifi is joined in a process of its own.
   """
 
-  alias Raycaster.{Engine, Keyboard, Link, Peers, RelayLink, RelayWire, Screen, Wifi, Wire}
+  alias Raycaster.{Engine, Keyboard, RelayLink, RelayWire, Screen, Wifi}
 
   # Read while compiling on the laptop: the badge never sees Application at all.
   @ssid Application.compile_env!(:raycaster, [:wifi, :ssid])
   @psk Application.compile_env!(:raycaster, [:wifi, :psk])
-  @broker Application.compile_env!(:raycaster, [:mqtt, :host])
-  @broker_port Application.compile_env!(:raycaster, [:mqtt, :port])
 
-  # A relay server instead of MQTT, see config/config.exs.
+  # The relay server, and its token if it asks for one, see config/config.exs.
   @relay Application.compile_env!(:raycaster, :relay)
   @relay_token Application.compile_env!(:raycaster, :relay_token)
 
@@ -36,13 +36,9 @@ defmodule Raycaster do
 
   @report_ms 1000
 
-  # How often to say where we are: while walking, and while standing so the
-  # others do not forget us. A badge is forgotten after four seconds. Each
-  # message costs every other badge about ten milliseconds of a chip that does a
-  # million instructions a second, so this is slow, and `Raycaster.Peers` fills
-  # the gaps by carrying the others along.
-  @moving_ms 500
-  @heartbeat_ms 1_500
+  # How often to say where we are. The relay hands out one snapshot a second and
+  # forgets a badge that is quiet for five seconds, so this is all it needs.
+  @announce_ms 1_000
 
   def start do
     {:ok, scene, display} = Screen.start()
@@ -56,22 +52,11 @@ defmodule Raycaster do
 
     presenter = spawn_link(fn -> present(scene, display) end)
 
-    chip = chip_id()
-    id = hex(chip)
+    id = hex(chip_id())
     IO.puts("raycaster: badge #{id}")
 
-    net = %{
-      kind: if(@relay == nil, do: :mqtt, else: :relay),
-      link: nil,
-      up: false,
-      peers: Peers.new(),
-      others: [],
-      id: id,
-      colour: Wire.colour(chip),
-      sent: nil
-    }
-
-    if @ssid != nil, do: go_online(self(), id)
+    net = %{link: nil, up: false, others: [], sent: nil}
+    if @ssid != nil and @relay != nil, do: go_online(self(), id)
 
     now = now()
 
@@ -83,7 +68,6 @@ defmodule Raycaster do
       draw: 0,
       hud: "",
       drawn: nil,
-      peers: nil,
       others: nil,
       showing: false
     }
@@ -91,7 +75,7 @@ defmodule Raycaster do
     loop(presenter, grid, Engine.new(), [], now, stats, net)
   end
 
-  # Joins wifi and then the broker, apart from the game, which cannot wait the
+  # Joins wifi and then the relay, apart from the game, which cannot wait the
   # up to 30 seconds and five tries that joining can take. Not linked to it, and
   # trapping exits: the network is optional, so nothing that goes wrong in it may
   # take the game down, only be said. The link is started here, so it lives as
@@ -141,20 +125,18 @@ defmodule Raycaster do
   defp start_link(game, id) do
     case link(game, id) do
       {:ok, link} -> send(game, {:link_pid, link})
-      other -> IO.puts("MQTT link did not start: #{inspect(other)}")
+      other -> IO.puts("Relay link did not start: #{inspect(other)}")
     end
   end
 
-  defp link(game, id) when @relay != nil,
+  defp link(game, id),
     do: RelayLink.start_link(owner: game, base: @relay, chip: id, token: @relay_token)
-
-  defp link(game, id), do: Link.start_link(owner: game, host: @broker, port: @broker_port, id: id)
 
   # Says why the link died, if it does, and starts it again a little later.
   defp watch(game, id) do
     receive do
       {:EXIT, pid, reason} ->
-        IO.puts("Network link #{inspect(pid)} died: #{inspect(reason)}")
+        IO.puts("Relay link #{inspect(pid)} died: #{inspect(reason)}")
         send(game, {:link, :down})
         :timer.sleep(5_000)
         start_link(game, id)
@@ -188,9 +170,7 @@ defmodule Raycaster do
     held = if @autopilot, do: ["Right"], else: held
 
     {held, last, net} =
-      if held == [] and player == stats.drawn and net.peers == stats.peers and
-           net.others == stats.others and
-           not Peers.moving?(net.peers, now()) do
+      if held == [] and player == stats.drawn and net.others == stats.others do
         idle(stats.at + @report_ms - now(), net)
       else
         {held, last, net}
@@ -198,10 +178,9 @@ defmodule Raycaster do
 
     t0 = now()
     player = Engine.step(grid, player, held, t0 - last)
-    net = announce(%{net | peers: Peers.expire(net.peers, t0)}, player, held, t0)
+    net = announce(net, player, t0)
 
-    others = if net.kind == :relay, do: net.others, else: Peers.others(net.peers, t0)
-    items = Engine.sprites(grid, player, others, Screen.width(), Screen.height())
+    items = Engine.sprites(grid, player, net.others, Screen.width(), Screen.height())
     items = items ++ Engine.frame(grid, player, Screen.width(), Screen.height())
     t1 = now()
 
@@ -218,7 +197,6 @@ defmodule Raycaster do
         wait: stats.wait + t2 - t1,
         draw: stats.draw + draw,
         drawn: player,
-        peers: net.peers,
         others: net.others,
         showing: true
     }
@@ -226,35 +204,28 @@ defmodule Raycaster do
     loop(presenter, grid, player, held, t0, report(stats, t2, length(items)), net)
   end
 
-  # Says where we are, when it is time: often while walking, now and then while
-  # standing so that nobody forgets us.
-  defp announce(%{up: true, link: link} = net, player, held, now) when link != nil do
-    gap = if held == [], do: gap(net.kind, :standing), else: gap(net.kind, :moving)
-
-    if net.sent == nil or now - net.sent >= gap do
-      publish(net.kind, link, player, net.colour)
+  # Says where we are, when it is time.
+  defp announce(%{up: true, link: link} = net, player, now) when link != nil do
+    if net.sent == nil or now - net.sent >= @announce_ms do
+      RelayLink.publish(link, player.x, player.y)
       %{net | sent: now}
     else
       net
     end
   end
 
-  defp announce(net, _player, _held, _now), do: net
+  defp announce(net, _player, _now), do: net
 
-  # The relay hands out one snapshot a tick and forgets a badge that is quiet for
-  # five seconds, so a badge need say little.
-  defp gap(:relay, _how), do: 1_000
-  defp gap(:mqtt, :moving), do: @moving_ms
-  defp gap(:mqtt, :standing), do: @heartbeat_ms
+  defp status(%{up: true, others: others}), do: line("online, #{length(others) + 1} playing")
 
-  defp publish(:relay, link, player, _colour), do: RelayLink.publish(link, player.x, player.y)
-  defp publish(:mqtt, link, player, colour), do: Link.publish(link, Wire.encode(player, colour))
+  defp status(%{link: nil}) do
+    cond do
+      @relay == nil -> line("offline")
+      @ssid == nil -> line("offline")
+      true -> line("joining wifi")
+    end
+  end
 
-  defp status(%{up: true, kind: :relay, others: others}),
-    do: line("online, #{length(others) + 1} playing")
-
-  defp status(%{up: true, peers: peers}), do: line("online, #{Peers.count(peers) + 1} playing")
-  defp status(%{link: nil}), do: line(if @ssid == nil, do: "offline", else: "joining wifi")
   defp status(_net), do: line("connecting")
 
   defp line(text), do: {:text, 4, 24, :default16px, 0x00FF00, 0x000000, text}
@@ -290,16 +261,14 @@ defmodule Raycaster do
       {:key, :up, _label} -> idle(timeout, net)
       {:link_pid, _link} = message -> {[], now(), heard(message, net)}
       {:link, _status} = message -> {[], now(), heard(message, net)}
-      {:peer, _id, _pose} = message -> {[], now(), heard(message, net)}
-      {:gone, _id} = message -> {[], now(), heard(message, net)}
       {:players, _list} = message -> {[], now(), heard(message, net)}
     after
       max(timeout, 0) -> {[], now(), net}
     end
   end
 
-  # Keys held right now: a press adds, a release removes. Whatever the network
-  # has said meanwhile is taken in too. Only its own messages are matched: the
+  # Keys held right now: a press adds, a release removes. Whatever the relay has
+  # said meanwhile is taken in too. Only its own messages are matched: the
   # display's `:shown` is in this mailbox as well, and is not this function's.
   defp drain(held, net) do
     receive do
@@ -307,8 +276,6 @@ defmodule Raycaster do
       {:key, :up, label} -> drain(:lists.delete(label, held), net)
       {:link_pid, _link} = message -> drain(held, heard(message, net))
       {:link, _status} = message -> drain(held, heard(message, net))
-      {:peer, _id, _pose} = message -> drain(held, heard(message, net))
-      {:gone, _id} = message -> drain(held, heard(message, net))
       {:players, _list} = message -> drain(held, heard(message, net))
     after
       0 -> {held, net}
@@ -317,13 +284,11 @@ defmodule Raycaster do
 
   defp heard({:link_pid, link}, net), do: %{net | link: link}
   defp heard({:link, :up}, net), do: %{net | up: true, sent: nil}
-  defp heard({:link, :down}, net), do: %{net | up: false, peers: Peers.new(), others: []}
+  defp heard({:link, :down}, net), do: %{net | up: false, others: []}
 
   # The relay's snapshot is everyone else in the room, ready to draw: a slot is a
   # colour, and there is nothing to carry along and nothing to expire.
   defp heard({:players, players}, net), do: %{net | others: figures(players)}
-  defp heard({:peer, id, pose}, net), do: %{net | peers: Peers.put(net.peers, id, pose, now())}
-  defp heard({:gone, id}, net), do: %{net | peers: Peers.drop(net.peers, id)}
 
   defp report(%{frames: frames} = stats, now, rects) when now - stats.at >= @report_ms do
     # Rounded, so that standing still (one frame in a little over a second)

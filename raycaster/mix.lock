@@ -1,5 +1,4 @@
 %{
-  "amqtt_client": {:git, "https://github.com/atomvm/amqtt.git", "35fc07b37d1f76f25397c1d4355c91dd17149318", [ref: "35fc07b37d1f76f25397c1d4355c91dd17149318", sparse: "amqtt_client"]},
   "atomvm": {:hex, :atomvm, "0.7.0-alpha.1", "06b23911a6f9bc2f6376d69a867a8257fa2e22e0be690ffcae960aac63701259", [:rebar3], [], "hexpm", "d9d2f6c24784f6b257ff6587d03473c592f621e66e152ba4f49ae4c255d4c789"},
   "atomvm_websocket_client": {:git, "https://github.com/nerves-hub/atomvm_websocket_client.git", "011b99c30bea5253eb29558e3c6ac420a5472c0f", [ref: "011b99c30bea5253eb29558e3c6ac420a5472c0f"]},
   "avm_scene": {:git, "https://github.com/atomvm/avm_scene.git", "aba9249f189d29d4564d81ba50bbe9fe28bc1d44", []},

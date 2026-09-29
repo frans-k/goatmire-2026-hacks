@@ -194,9 +194,12 @@ fps were frames the game made and the panel never showed.
 
 ## Playing with others
 
-Every badge running this joins one MQTT broker, publishes where it is, and draws
-the others as small coloured figures, hidden behind walls. The line under the fps
-one says `online, 3 playing`, or `offline` when there is no wifi.
+Every badge running this joins the relay server (`../relay`), which puts it in a room
+of at most eight by itself, tells it where the others are once a second, and is told
+where it stands once a second. The others are drawn as small coloured figures, hidden
+behind walls. Positions jump, once a second; that is what keeps it light. The line
+under the fps one says `online, 3 playing`, or `offline` when there is no wifi or no
+relay.
 
 Give it your wifi in `config/config_local.exs`, which is not in git:
 
@@ -205,92 +208,59 @@ import Config
 config :raycaster, :wifi, ssid: "my network", psk: "my password"
 ```
 
-then `mix compile --force` and flash as usual (the credentials are read while
-compiling, so a change needs the recompile). Without them the game starts as
-before and you walk around alone. Joining wifi happens beside the game, so it
-never waits for it.
-
-A badge publishes 9 bytes, `<<x::16, y::16, a::16, r, g, b>>`, to
-`goatmire/raycaster/v1/<chip id>` twice a second while it moves and once every
-1.5 seconds while it stands, and listens on `goatmire/raycaster/v1/+`. An empty message
-on its own topic means it has left, which is what the broker sends for a badge that
-dies (its last will). A badge not heard from for four seconds is forgotten. It is
-all in `lib/wire.ex` and `lib/peers.ex`, both tested on the laptop; `lib/link.ex` is
-the MQTT session, and `Engine.sprites/5` draws the figures.
-
-**The default broker, `test.mosquitto.org`, is open to everyone.** Anyone can read
-where you are or publish fake players. Bytes that do not decode, or that put a badge
-outside the map, are dropped. Fine for a badge at a party; not for anything that
-matters. Change `config :raycaster, :mqtt` to use your own.
-
-To try it with one badge, `elixir scripts/ghosts.exs 3 120` makes three ghosts
-wander the map for two minutes.
-
-### What other players cost
-
-Every message from another badge costs about ten milliseconds of the chip's time:
-the socket, the MQTT client, the link, the game and the peer list, on something that
-does a million instructions a second. Measured by turning on the spot (the
-`RAYCASTER_AUTOPILOT=1` build switch, so every run casts the same views; 
-`RAYCASTER_OFFLINE=1` leaves the network out), at five updates a second:
-
-| | fps | ray casting | drawing |
-|---|---|---|---|
-| alone, no network | 19.2 | 25.4 ms | 49.8 ms |
-| online, nobody else | 16.2 | 32.3 ms | 56.9 ms |
-| 3 others | 12.6 | 46.6 ms | 70.5 ms |
-| 8 others | 8.8 | 81.3 ms | 104.5 ms |
-
-Being connected costs about 7 ms, and each other player about 6 ms a frame; the
-figures themselves cost nothing to speak of (the rectangle counts did not change).
-So the fix was fewer messages, not less drawing: two updates a second, with
-`Raycaster.Peers` carrying each player along from its last two positions for up to
-600 ms, and never off the map. Now 17.2, 15.7 and 13.2 fps for nobody, 3 and 8
-others, with 8 others casting in 54 ms. Each other player still costs about 3 ms a
-frame, so twelve moving at once (the most it keeps track of) would hurt.
-
-Figures are hidden by a walk along the line to them, a quarter cell at a time, not
-by a ray per column, so someone half behind a corner is either seen or not.
-
-### With a relay server instead of MQTT
-
-MQTT makes every badge take in every other badge's messages, and each one costs
-about ten milliseconds. `../relay` moves that to a server: a small websocket server
-(`cd ../relay && mix run --no-halt`, port 4040) that speaks the part of Phoenix
-channels the badge firmware's chat already does. A badge joins `raycaster:lobby`
-and is put in a room of at most eight by itself (a new room is made when every one
-is full, so nobody is refused), tells the server where it stands once a second, and
-is sent **one snapshot a second** of everyone in its room, however many they are.
-Positions jump; that is the price.
-
-Build with `RAYCASTER_RELAY=ws://<host>:4040` to use it (read while compiling, like
-the wifi):
+and say where the relay is when building. Both are read while compiling, so a change
+needs `mix compile --force`:
 
 ```sh
-RAYCASTER_RELAY=ws://192.168.1.5:4040 mix atomvm.esp32.flash
-elixir scripts/relay_ghosts.exs ws://localhost:4040 3 120   # three ghosts
+RAYCASTER_RELAY=wss://relay.example.com RAYCASTER_RELAY_TOKEN=... mix atomvm.esp32.flash
 ```
 
-Same test as above, turning on the spot, 8 others:
+The wifi has to be 2.4 GHz. `wss://` is checked against certificates, which are not
+yet valid at the epoch, so the game waits for the badge's clock, up to 20 seconds,
+before it connects; `ws://host:4040` needs neither the wait nor TLS. Without wifi or a
+relay the game starts as before and you walk around alone. Joining wifi happens
+beside the game, so it never waits for it.
+
+To try it with one badge, run the relay on the laptop (`cd ../relay && mix run
+--no-halt`) and three ghosts against it, with the badge on the same network:
+
+```sh
+elixir scripts/relay_ghosts.exs ws://localhost:4040 3 120   # RELAY_TOKEN=... if it asks
+```
+
+A badge says where it stands (`x` and `y`, in the map's fixed point) and the relay
+sends back `{"p": [[slot, x, y], ...]}`, everyone in the room; a slot is who a player
+is and what colour it is drawn in. The frames are in `lib/relay_wire.ex`, tested on the
+laptop and, by the ghosts, against the real server; `lib/relay_link.ex` keeps the
+websocket. Figures are hidden by a walk along the line to them, a quarter cell at a
+time, not by a ray per column, so someone half behind a corner is either seen or not.
+One off to the side is skipped before that walk.
+
+The relay has no accounts, only a shared token that is in every badge's firmware, and
+the badge takes its word for nothing: a position must be a whole number inside the
+map. See `../relay/README.md` for what it does and does not protect.
+
+### Why a relay and not MQTT
+
+An earlier version of this used an MQTT broker, which makes every badge take in every
+other badge's messages, and each one costs about ten milliseconds of a chip that does
+a million instructions a second. MQTT is gone now. Measured turning on the spot (the
+`RAYCASTER_AUTOPILOT=1` build switch, so every run casts the same views), with the
+MQTT version at two updates a second and the others carried along between them:
 
 | | fps | ray casting | drawing |
 |---|---|---|---|
 | alone, no network | 19.2 | 25.4 ms | 49.8 ms |
 | MQTT, nobody else | 17.2 | 29.4 ms | 53.7 ms |
-| MQTT, 8 others (2 updates a second) | 13.2 | 54.0 ms | 65.5 ms |
+| MQTT, 8 others | 13.2 | 54.0 ms | 65.5 ms |
 | relay, nobody else | 17.5 | 30.5 ms | 52.3 ms |
 | relay, 8 others | 16.3 | 39.2 ms | 54.1 ms |
 
-What is left with 8 others is drawing them, about a millisecond each, since a figure
-that could be seen costs a walk along the line to it, and one off to the side is
-skipped before that.
-
-The relay listens on all addresses with no authentication, so it should only be
-reachable by the badges: it checks that a position is a whole number inside the map
-and takes at most one from a badge every 200 ms, and answers nothing it does not
-understand, but anyone who can reach it can join. The badge needs the relay's
-address to be reachable from its wifi: the Mac's `en0` address on a shared hotspot
-worked; the relay is not exposed anywhere else.
+At five updates a second, 8 others took MQTT from 19 to 9 fps. With a relay the
+sorting is done on the server, so a badge hears one message a second however many
+others there are, and what is left with 8 others is drawing them, about a millisecond
+each. MQTT needed no server of its own, but it has no rooms, costs more for every
+player, and its client alone (18.7 KB) does not fit the firmware's image.
 
 ### In the official badge firmware
 
@@ -372,8 +342,6 @@ Next:
 - One map, hard-coded in `lib/engine.ex`. Loading maps, or letting Claude
   generate them, would need the map to come from outside the module.
 - The fps line in the corner is a permanent debug readout. Make it a toggle.
-- Sprites, and other badges as sprites over MQTT: each badge would publish its
-  position and the others would draw it as a sprite. Not designed beyond that.
 - Make it a mode of the chat badge (`../chat`), switched by a key, instead of a
   separate firmware.
 

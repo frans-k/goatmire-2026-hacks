@@ -33,11 +33,6 @@ defmodule Raycaster.MixProject do
        github: "nerves-hub/atomvm_websocket_client",
        ref: "011b99c30bea5253eb29558e3c6ac420a5472c0f",
        manager: :rebar3},
-      # MQTT 3.1.1 client in plain Erlang, for finding the other players.
-      {:amqtt_client,
-       github: "atomvm/amqtt",
-       ref: "35fc07b37d1f76f25397c1d4355c91dd17149318",
-       sparse: "amqtt_client"},
       {:exatomvm, github: "AtomVM/exatomvm", runtime: false},
       # Runs esptool in-process for the mix atomvm.esp32.* tasks.
       {:pythonx, "~> 0.4.0", runtime: false},
