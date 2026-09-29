@@ -192,6 +192,89 @@ Walking now reads 11 fps on average and 15 at best, casting in about 33 ms with
 the panel taking 65: the panel, not the engine, is the limit. The earlier 18 to 22
 fps were frames the game made and the panel never showed.
 
+## Playing with others
+
+Every badge running this joins the relay server (`../relay`), which puts it in a room
+of at most eight by itself, tells it where the others are once a second, and is told
+where it stands once a second. The others are drawn as small coloured figures, hidden
+behind walls. Positions jump, once a second; that is what keeps it light. The line
+under the fps one says `online, 3 playing`, or `offline` when there is no wifi or no
+relay.
+
+Give it your wifi in `config/config_local.exs`, which is not in git:
+
+```elixir
+import Config
+config :raycaster, :wifi, ssid: "my network", psk: "my password"
+```
+
+and say where the relay is when building. Both are read while compiling, so a change
+needs `mix compile --force`:
+
+```sh
+RAYCASTER_RELAY=wss://relay.example.com RAYCASTER_RELAY_TOKEN=... mix atomvm.esp32.flash
+```
+
+The wifi has to be 2.4 GHz. `wss://` gives TLS, checked against the certificates in the
+VM's bundle; `ws://host:4040` is plain. A badge joins `wss://` about four seconds after
+it boots, with no wait for its clock. A certificate is not yet valid at the epoch, and
+the firmware's chat waits for the time before it connects, so that surprised me: the
+wifi is given an SNTP host as the firmware's is, but I never saw the clock read as set
+(`:erlang.system_time` said it was not), and the certificate was accepted regardless. I
+do not know why. Without wifi or a relay the game starts as before and you walk around
+alone. Joining wifi happens
+beside the game, so it never waits for it.
+
+To try it with one badge, run the relay on the laptop (`cd ../relay && mix run
+--no-halt`) and three ghosts against it, with the badge on the same network:
+
+```sh
+elixir scripts/relay_ghosts.exs ws://localhost:4040 3 120   # RELAY_TOKEN=... if it asks
+```
+
+A badge says where it stands (`x` and `y`, in the map's fixed point) and the relay
+sends back `{"p": [[slot, x, y], ...]}`, everyone in the room; a slot is who a player
+is and what colour it is drawn in. The frames are in `lib/relay_wire.ex`, tested on the
+laptop and, by the ghosts, against the real server; `lib/relay_link.ex` keeps the
+websocket. Figures are hidden by a walk along the line to them, a quarter cell at a
+time, not by a ray per column, so someone half behind a corner is either seen or not.
+One off to the side is skipped before that walk.
+
+The relay has no accounts, only a shared token that is in every badge's firmware, and
+the badge takes its word for nothing: a position must be a whole number inside the
+map. See `../relay/README.md` for what it does and does not protect.
+
+### Why a relay and not MQTT
+
+An earlier version of this used an MQTT broker, which makes every badge take in every
+other badge's messages, and each one costs about ten milliseconds of a chip that does
+a million instructions a second. MQTT is gone now. Measured turning on the spot (the
+`RAYCASTER_AUTOPILOT=1` build switch, so every run casts the same views), with the
+MQTT version at two updates a second and the others carried along between them:
+
+| | fps | ray casting | drawing |
+|---|---|---|---|
+| alone, no network | 19.2 | 25.4 ms | 49.8 ms |
+| MQTT, nobody else | 17.2 | 29.4 ms | 53.7 ms |
+| MQTT, 8 others | 13.2 | 54.0 ms | 65.5 ms |
+| relay, nobody else | 17.5 | 30.5 ms | 52.3 ms |
+| relay, 8 others | 16.3 | 39.2 ms | 54.1 ms |
+
+At five updates a second, 8 others took MQTT from 19 to 9 fps. With a relay the
+sorting is done on the server, so a badge hears one message a second however many
+others there are, and what is left with 8 others is drawing them, about a millisecond
+each. MQTT needed no server of its own, but it has no rooms, costs more for every
+player, and its client alone (18.7 KB) does not fit the firmware's image.
+
+### In the official badge firmware
+
+**It does not fit yet.** The firmware's `main.avm` slot is 671,744 bytes and its
+packed app is 663,220, so there is 8.5 KB to spare. A page with this engine alone
+added 10,512 bytes when measured, 2 KB over, and with multiplayer and amqtt the
+image was 706,456 bytes, 43,236 more than the firmware's. An image over the slot is
+cut off when it is loaded, and the badge crashes at boot. Multiplayer is only in
+this project for now.
+
 ## Why not real Doom?
 
 The question this started from: how do people run Doom on odd hardware, and can
@@ -263,8 +346,6 @@ Next:
 - One map, hard-coded in `lib/engine.ex`. Loading maps, or letting Claude
   generate them, would need the map to come from outside the module.
 - The fps line in the corner is a permanent debug readout. Make it a toggle.
-- Sprites, and other badges as sprites over MQTT: each badge would publish its
-  position and the others would draw it as a sprite. Not designed beyond that.
 - Make it a mode of the chat badge (`../chat`), switched by a key, instead of a
   separate firmware.
 

@@ -15,3 +15,6 @@ erl_crash.dump
 
 # AtomVM firmware images downloaded by mix atomvm.esp32.install
 /firmware_images/
+
+# Wifi credentials for multiplayer, see config/config.exs.
+/config/config_local.exs

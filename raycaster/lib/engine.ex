@@ -75,6 +75,10 @@ defmodule Raycaster.Engine do
   @turn_right 16
   @turn_left 32
 
+  # Nearer than this a figure is inside the player, and its size would run away.
+  @nearest 64
+  @skin 0xF0D0A8
+
   # How close to a wall the player may get, in Q8.
   @radius 60
 
@@ -162,6 +166,133 @@ defmodule Raycaster.Engine do
       # list wants the rightmost first.
       {^ref, {right_run, right}} -> :lists.reverse(right, join(left_run, right_run, left))
     end
+  end
+
+  @doc """
+  Other players as small figures, to go in front of what `frame/4` returns.
+
+  `others` is a list of `{x, y, colour}`, positions in the same Q8 as the
+  player's. A figure is a head and a body, sized by how far away it is, and it is
+  left out when it is behind the player, off to the side of the view, or hidden
+  by a wall. The nearest come first, since the first item is drawn on top.
+
+  Each figure costs a walk along the line to it, not a ray per column, and the
+  test is all or nothing: someone half behind a corner is either seen or not.
+  """
+  def sprites(_grid, _player, [], _width, _height), do: []
+
+  def sprites(grid, %{x: x, y: y, a: angle}, others, width, height) do
+    index = index(angle)
+    dir_x = cos(index)
+    dir_y = sin(index)
+    plane_x = div(-dir_y * 169, 256)
+    plane_y = div(dir_x * 169, 256)
+    # The camera's determinant, over 256 so the quotients below come out in Q8
+    # without a product big enough to be boxed.
+    det = div(plane_x * dir_y - dir_x * plane_y, 256)
+
+    view = {grid, x, y, dir_x, dir_y, plane_x, plane_y, det, width, height}
+
+    # Nearest first: the first item is drawn on top.
+    nearest_first = :lists.keysort(1, figures(view, others, []))
+
+    flatten_figures(nearest_first)
+  end
+
+  defp figures(_view, [], acc), do: acc
+
+  defp figures(view, [{ox, oy, colour} | rest], acc) do
+    {_grid, x, y, dir_x, dir_y, plane_x, plane_y, det, _width, _height} = view
+
+    rel_x = ox - x
+    rel_y = oy - y
+    depth = div(plane_x * rel_y - plane_y * rel_x, det)
+    across = div(dir_y * rel_x - dir_x * rel_y, det)
+
+    acc = if depth >= @nearest, do: seen(acc, view, ox, oy, depth, across, colour), else: acc
+
+    figures(view, rest, acc)
+  end
+
+  # Off to the side of the view costs nothing: the walk along the line to a figure
+  # is only made for one that could be seen, which is a fraction of them.
+  defp seen(acc, view, ox, oy, depth, across, colour) do
+    {grid, x, y, _dir_x, _dir_y, _plane_x, _plane_y, _det, width, height} = view
+
+    centre = div(width * (depth + across), 2 * depth)
+    line = div(height * 256, depth)
+
+    if centre + line > 0 and centre - line < width and visible?(grid, x, y, ox, oy) do
+      add_figure(acc, depth, centre, line, colour, width, height)
+    else
+      acc
+    end
+  end
+
+  # `line` is how tall a wall would be at this distance. A figure is 6/10 of it,
+  # standing on the floor line.
+  defp add_figure(acc, depth, centre, line, colour, width, height) do
+    body_h = div(line * 6, 10)
+    floor = div(height + line, 2)
+    head = div(body_h * 3, 10)
+    body_w = max(div(line * 3, 10), 2)
+    shaded = shade(colour, depth)
+
+    left = centre - div(body_w, 2)
+    top = floor - body_h
+
+    items =
+      clip({:rect, left, top + head, body_w, body_h - head, shaded}, width, height) ++
+        clip({:rect, centre - div(head, 2), top, head, head, @skin}, width, height)
+
+    [{depth, items} | acc]
+  end
+
+  defp flatten_figures([]), do: []
+
+  defp flatten_figures([{_depth, items} | rest]),
+    do: :lists.append(items, flatten_figures(rest))
+
+  # Keeps a rectangle on the screen, or drops it.
+  defp clip({:rect, x, y, w, h, colour}, width, height) do
+    left = max(x, 0)
+    top = max(y, 0)
+    right = min(x + w, width)
+    bottom = min(y + h, height)
+
+    if right > left and bottom > top do
+      [{:rect, left, top, right - left, bottom - top, colour}]
+    else
+      []
+    end
+  end
+
+  # Nothing solid between two points, looked at every quarter cell.
+  defp visible?(grid, x, y, ox, oy) do
+    dx = ox - x
+    dy = oy - y
+    steps = max(div(max(abs(dx), abs(dy)), 64), 1)
+
+    clear?(grid, x, y, dx, dy, steps, 1)
+  end
+
+  defp clear?(_grid, _x, _y, _dx, _dy, steps, i) when i >= steps, do: true
+
+  defp clear?(grid, x, y, dx, dy, steps, i) do
+    if open?(grid, x + div(dx * i, steps), y + div(dy * i, steps)) do
+      clear?(grid, x, y, dx, dy, steps, i + 1)
+    else
+      false
+    end
+  end
+
+  defp shade({r, g, b}, depth) do
+    factor = max(64, 256 - div(depth, 10))
+    div(r * factor, 256) <<< 16 ||| div(g * factor, 256) <<< 8 ||| div(b * factor, 256)
+  end
+
+  defp shade(colour, depth) do
+    shade({colour >>> 16 &&& 255, colour >>> 8 &&& 255, colour &&& 255}, depth)
   end
 
   # `run` is the rectangle being widened: neighbouring columns with the same

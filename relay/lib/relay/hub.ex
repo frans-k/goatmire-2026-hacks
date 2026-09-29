@@ -1,0 +1,101 @@
+defmodule Relay.Hub do
+  @moduledoc """
+  Holds the rooms and tells every player in each of them, once a tick, where
+  everyone stands.
+
+  A badge sends where it is now and then and hears one message a tick, however
+  many others there are. Taking in a message costs a badge about ten milliseconds,
+  so one snapshot beats one message per player, and everything else here exists to
+  keep it that way: the rooms do the sorting, this only sends.
+
+  A player is a process, the websocket handler, and is out of its room when that
+  process ends. It is sent `{:snap, frame}`, a Phoenix frame ready to push.
+  """
+
+  use GenServer
+
+  alias Relay.Rooms
+
+  @topic "raycaster:lobby"
+
+  def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+
+  @doc "The topic badges join."
+  def topic, do: @topic
+
+  @doc """
+  Puts `pid` in a room. Returns `{room, slot, max}`, or `{:error, :full}` when the
+  server already holds as many players as `:max_players` allows (200).
+  """
+  def join(pid), do: GenServer.call(__MODULE__, {:join, pid})
+
+  @doc "Where `pid` stands, as heard now."
+  def move(pid, x, y), do: GenServer.cast(__MODULE__, {:move, pid, x, y, now()})
+
+  def leave(pid), do: GenServer.cast(__MODULE__, {:leave, pid})
+
+  @doc "The rooms and how many are in each."
+  def counts, do: GenServer.call(__MODULE__, :counts)
+
+  @impl true
+  def init(opts) do
+    tick_ms = Keyword.get(opts, :tick_ms, Application.get_env(:relay, :tick_ms, 1_000))
+    max = Keyword.get(opts, :max, 8)
+    Process.send_after(self(), :tick, tick_ms)
+
+    {:ok, %{rooms: Rooms.new(max), tick_ms: tick_ms, max: max, monitors: %{}}}
+  end
+
+  @impl true
+  def handle_call({:join, pid}, _from, state) do
+    cap = Application.get_env(:relay, :max_players, 200)
+
+    if Rooms.count(state.rooms) >= cap and not Rooms.member?(state.rooms, pid) do
+      {:reply, {:error, :full}, state}
+    else
+      {rooms, {room, slot}} = Rooms.join(state.rooms, pid)
+      monitors = Map.put_new_lazy(state.monitors, pid, fn -> Process.monitor(pid) end)
+
+      {:reply, {room, slot, state.max}, %{state | rooms: rooms, monitors: monitors}}
+    end
+  end
+
+  def handle_call(:counts, _from, state), do: {:reply, Rooms.counts(state.rooms), state}
+
+  @impl true
+  def handle_cast({:move, pid, x, y, now}, state) do
+    {:noreply, %{state | rooms: Rooms.move(state.rooms, pid, x, y, now)}}
+  end
+
+  def handle_cast({:leave, pid}, state), do: {:noreply, drop(state, pid)}
+
+  @impl true
+  def handle_info(:tick, state) do
+    now = now()
+
+    for room <- Rooms.rooms(state.rooms) do
+      players = Rooms.snapshot(state.rooms, room, now)
+      frame = JSON.encode!([nil, nil, @topic, "snap", %{"p" => players}])
+
+      for {pid, _slot} <- Rooms.members(state.rooms, room), do: send(pid, {:snap, frame})
+    end
+
+    Process.send_after(self(), :tick, state.tick_ms)
+    {:noreply, state}
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state), do: {:noreply, drop(state, pid)}
+
+  defp drop(state, pid) do
+    case Map.pop(state.monitors, pid) do
+      {nil, _monitors} ->
+        %{state | rooms: Rooms.leave(state.rooms, pid)}
+
+      {ref, monitors} ->
+        Process.demonitor(ref, [:flush])
+        %{state | rooms: Rooms.leave(state.rooms, pid), monitors: monitors}
+    end
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
+end
