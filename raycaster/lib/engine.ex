@@ -88,7 +88,7 @@ defmodule Raycaster.Engine do
 
   def cols, do: @cols
 
-  # Held keys are labels from Raycaster.Keymap.
+  # Held keys are labels from Raycaster.Keymap, binaries or charlists.
   def step(grid, state, held, dt_ms) do
     keys = keys(held, 0)
     forward = axis(keys, @forward, @back)
@@ -298,6 +298,17 @@ defmodule Raycaster.Engine do
   defp key("D"), do: @turn_right
   defp key("Left"), do: @turn_left
   defp key("A"), do: @turn_left
+  # The badge firmware's keyboard reports labels as charlists.
+  defp key(~c"Up"), do: @forward
+  defp key(~c"W"), do: @forward
+  defp key(~c"Down"), do: @back
+  defp key(~c"S"), do: @back
+  defp key(~c"E"), do: @right
+  defp key(~c"Q"), do: @left
+  defp key(~c"Right"), do: @turn_right
+  defp key(~c"D"), do: @turn_right
+  defp key(~c"Left"), do: @turn_left
+  defp key(~c"A"), do: @turn_left
   defp key(_label), do: 0
 
   # 1, 0 or -1: both directions of an axis held cancel out.
