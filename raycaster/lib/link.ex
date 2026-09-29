@@ -71,7 +71,7 @@ defmodule Raycaster.Link do
       :amqtt_client.connect(%{
         host: state.host,
         port: state.port,
-        client_id: ~c"avm-rc-" ++ :erlang.binary_to_list(state.id),
+        client_id: "avm-rc-" <> state.id,
         keep_alive_seconds: @keep_alive_s,
         # An empty payload on our own topic, sent by the broker if this badge
         # dies, is how the others learn it has gone.

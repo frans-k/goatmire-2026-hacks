@@ -79,21 +79,20 @@ defmodule Raycaster do
   end
 
   # Joins wifi and then the broker, apart from the game, which cannot wait the
-  # up to 30 seconds and five tries that joining can take. The link is started
-  # here, so it lives as long as this process, which is parked once it is done.
+  # up to 30 seconds and five tries that joining can take. Not linked to it, and
+  # trapping exits: the network is optional, so nothing that goes wrong in it may
+  # take the game down, only be said. The link is started here, so it lives as
+  # long as this process.
   defp go_online(game, id) do
-    spawn_link(fn ->
+    spawn(fn ->
+      Process.flag(:trap_exit, true)
       IO.puts("Connecting to #{@ssid}...")
 
       case Wifi.connect(@ssid, @psk) do
         {:ok, address} ->
           IO.puts("Wifi up, #{address}")
-
-          {:ok, link} =
-            Link.start_link(owner: game, host: @broker, port: @broker_port, id: id)
-
-          send(game, {:link_pid, link})
-          park()
+          start_link(game, id)
+          watch(game, id)
 
         {:error, reason} ->
           IO.puts("Wifi failed: #{inspect(reason)}, playing alone")
@@ -101,9 +100,25 @@ defmodule Raycaster do
     end)
   end
 
-  defp park do
+  defp start_link(game, id) do
+    case Link.start_link(owner: game, host: @broker, port: @broker_port, id: id) do
+      {:ok, link} -> send(game, {:link_pid, link})
+      other -> IO.puts("MQTT link did not start: #{inspect(other)}")
+    end
+  end
+
+  # Says why the link died, if it does, and starts it again a little later.
+  defp watch(game, id) do
     receive do
-      _message -> park()
+      {:EXIT, pid, reason} ->
+        IO.puts("MQTT link #{inspect(pid)} died: #{inspect(reason)}")
+        send(game, {:link, :down})
+        :timer.sleep(5_000)
+        start_link(game, id)
+        watch(game, id)
+
+      _other ->
+        watch(game, id)
     end
   end
 
