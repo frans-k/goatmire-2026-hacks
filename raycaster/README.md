@@ -18,7 +18,10 @@ mix atomvm.esp32.monitor --timeout 20
 ```
 
 The engine is plain integer maths, so its geometry is tested on the laptop with
-`mix test`: known wall distances, staying on screen, collisions, turning.
+`mix test`: known wall distances, staying on screen, collisions, turning. It
+also draws a fixed tour of eight views and compares them with
+`test/tour_frames.exs`, the frames the engine drew before it was sped up, so a
+change meant only to be faster has to draw exactly the same picture.
 
 The monitor prints, once a second:
 
@@ -28,6 +31,8 @@ The monitor prints, once a second:
 
 `ray` is time spent casting rays and building the display list, `push` is time
 the display took to accept the frame. The same line is drawn in the top corner.
+Standing still with no key held, nothing is redrawn except that line, once a
+second, so it reads 1 fps.
 
 ## How it works
 
@@ -82,7 +87,62 @@ million BEAM instructions a second. A ray of 15 steps costs about 1.6 ms, which
 is why 80 columns cannot reach 15 frames per second.
 
 `lib/bench.ex` reproduces the micro-benchmarks. Set `start: Raycaster.Bench` in
-`mix.exs`, flash, and read the monitor.
+`mix.exs`, flash, and read the monitor. Before them it times the same fixed tour
+the tests use, five frames per view, which is the number to compare when
+changing the engine.
+
+### After shortening the ray loop
+
+Measured later, on AtomVM 0.8.0-dev. The micro-benchmarks came out faster than
+above on this firmware (3 us for an empty loop, 10 us for a nine argument
+call), so compare within this table rather than with the one above.
+
+| | ray casting | display push | frames per second |
+|---|---|---|---|
+| Fixed tour, engine before the change | 41.8 ms | | |
+| Fixed tour, engine after the change | 27.0 ms | | |
+| Game, standing still | 26 to 31 ms | 7 to 10 ms | redraws once a second |
+| Game, walking around | 55 to 84 ms | 9 to 14 ms | 2 to 13, 9 to 13 while walking steadily |
+
+The renderer is 1.55 times faster and every view in the tour gained. Walking
+did not get faster, and the reason is the keyboard, not the renderer: while a
+key is held, `Raycaster.Keyboard` rescans the matrix every 20 ms, and one scan
+took 18 to 22 ms (timed on the badge). The scanner and the game share the
+chip, so the game gets about half of it and a walking frame takes twice as
+long as a standing one. `ray` in the log is wall clock time, which is why the
+scanning shows up there.
+
+`Engine.step/4` also costs 3.2 ms a frame standing still and about 6 ms
+walking, mostly the key lists it reads as literals.
+
+### After trimming the work per column
+
+Once a ray step was 6 instructions, the steps stopped mattering: the tour
+averages 168 of them a frame, about 4 per column. Setting up each column was
+the rest, so that was trimmed next, again drawing exactly the same frames.
+
+| | fixed tour |
+|---|---|
+| Before any of this | 41.8 ms |
+| Ray loop shortened | 27.0 ms |
+| `cast` and `colour` inlined into the column loop | 23.7 ms |
+| Per frame constants in one tuple, start cell worked out once, no tuple per axis | 21.0 ms |
+| Right half of the screen cast in a second process | 15.4 ms |
+
+AtomVM runs two schedulers here, one per core (the bench prints the count).
+Drawing the tour twice took 336 ms in one process and 224 ms split across two,
+about 1.5 times, not 2. So `frame/4` now spawns a process for the right half of
+the screen each frame; that half is cast from the right edge inward, and the
+two rectangles meeting at the seam are joined when they match, so the frames
+are still exactly the same. With the cost of the spawn it gives 1.36 times.
+
+In the game after all of this, standing still casts in 17 to 19 ms. Walking
+casts in 27 to 35 ms most of the time (up to 57), because the keyboard scan
+still takes its share, and the push stays at about 10 ms. Seconds of steady
+walking read 16 to 22 fps, where they read 11 to 13 before; seconds with
+stops in them read lower, since standing still redraws only once a second.
+With two schedulers the keyboard scan could have run on the other core, yet
+walking still halved the frame rate, so something in the scan holds up both.
 
 ## Why not real Doom?
 
@@ -120,13 +180,35 @@ group.
 
 **Speed**
 
-- The sine table is still a literal, read a few times per frame. Passing it as an
-  argument like the map would save that. Estimated at about 1 ms per frame (four
-  reads at roughly 280 us each from the benchmark), not measured in the game.
-- Fewer arguments per ray step. A call with nine arguments costs about 14 us on
-  its own, and a step is one such call. Packing the per-ray constants into one
-  tuple would cut that. Also from the benchmark, not tried.
-- Lower the view distance (`@max_steps`) so rays in open rooms stop early.
+Done, and measured above (the fixed tour went from 41.8 to 27.0 ms a frame):
+
+- The ray step loop is 6 BEAM instructions instead of about 37. The bounds
+  check and the step limit are gone, because the map's outer wall stops every
+  ray (a test checks the border stays closed), and the cell is one index into
+  the grid tuple instead of an x and a y.
+- No module literals are read while drawing. The sine table and the wall
+  colours are functions returning plain integers, which the compiler makes
+  into jump tables.
+- The "no wall crossing" distance was `1 <<< 28`, past the 28 bit integers
+  AtomVM keeps unboxed on this chip. It is `1 <<< 26` now.
+
+Next:
+
+- The column setup was trimmed (21.0 ms a frame, see above). What is left per
+  column is mostly the arithmetic itself; a table of shaded colours passed in
+  like the map would save the shading, perhaps 10%.
+- The keyboard scan takes about half the chip while a key is held (see above).
+  Scanning less often, only the rows with game keys, or with less work per row
+  would give it back. Left for now, because the input may change.
+- `step/4` costs 3 to 6 ms a frame, mostly six small key lists read as
+  literals.
+- The fps line reads "0 fps" standing still: one frame in just over a second
+  rounds down.
+- The second process is spawned afresh every frame, which copies the map into
+  it each time. A worker that lives for the whole game and keeps its own copy
+  of the map could get closer to the 1.5 times two processes allow, perhaps
+  1 ms a frame.
+- Overlap the display push with casting the next frame.
 - Draw at 40 columns while moving and 80 while standing still. `@cols` is a
   module attribute today, so it would have to become an argument.
 

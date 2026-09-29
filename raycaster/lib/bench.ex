@@ -3,13 +3,37 @@ defmodule Raycaster.Bench do
   Where does the time go on the badge? Set `start: Raycaster.Bench` in mix.exs,
   flash, and read the monitor.
 
-  It times a handful of tiny loops, each on its own, so the cost of one
+  First it renders a fixed tour of views, the same ones every time, so a change
+  to the engine can be compared frame for frame instead of against a walk
+  around the map, which varies too much (61 to 111 ms a frame).
+
+  Then it times a handful of tiny loops, each on its own, so the cost of one
   operation can be read off. The interesting pair is a 256 entry table read as
   a module literal against the same table passed as an argument: AtomVM copies
   a literal onto the heap on every use, which the literal loops pay for.
   """
 
   import Bitwise
+
+  alias Raycaster.{Engine, Screen}
+
+  # Places to stand, in Q8 (256 is one cell), and angles, 65536 to a turn. The
+  # spawn point looking down the long corridor, rays running exactly along an
+  # axis, a wall right in front, and views across the open rooms. The engine
+  # tests check these frames against test/tour_frames.exs.
+  @tour [
+    {384, 384, 0},
+    {384, 384, 16_384},
+    {384, 384, 8_192},
+    {2000, 1500, 40_000},
+    {3200, 3200, 32_768},
+    {1900, 700, 50_000},
+    {800, 2400, 12_000},
+    {3500, 600, 24_000}
+  ]
+
+  # Each view is drawn this many times and the average kept.
+  @frames 5
 
   # A 256 entry tuple like the raycaster's map and sine table.
   @table List.to_tuple(Enum.to_list(0..255))
@@ -19,7 +43,50 @@ defmodule Raycaster.Bench do
   # memory (OOM while reading literals_table).
   @n_literal 100
 
+  def tour, do: for({x, y, a} <- @tour, do: %{x: x, y: y, a: a})
+
   def start do
+    frames()
+    cores()
+    micro()
+  end
+
+  # Raycaster.Engine.frame/4 casts half the screen in a second process, which
+  # only helps if AtomVM runs a scheduler on each of the chip's two cores.
+  defp cores do
+    schedulers =
+      try do
+        :erlang.system_info(:schedulers_online)
+      catch
+        _kind, reason -> reason
+      end
+
+    IO.puts("schedulers online: #{inspect(schedulers)}")
+  end
+
+  defp frames do
+    grid = Engine.grid()
+
+    views = tour()
+
+    total =
+      Enum.reduce(views, 0, fn player, total ->
+        ms = timed(fn -> draw(grid, player, @frames) end)
+        IO.puts("view #{player.x},#{player.y} angle #{player.a}: #{tenths(ms, @frames)} ms")
+        total + ms
+      end)
+
+    IO.puts("tour: #{tenths(total, @frames * length(views))} ms a frame")
+  end
+
+  defp draw(_grid, _player, 0), do: :ok
+
+  defp draw(grid, player, n) do
+    Engine.frame(grid, player, Screen.width(), Screen.height())
+    draw(grid, player, n - 1)
+  end
+
+  defp micro do
     table = @table
 
     results = [
@@ -33,6 +100,12 @@ defmodule Raycaster.Bench do
     for {label, n, ms} <- results do
       IO.puts("#{label}: #{ms} ms for #{n}, #{div(ms * 1000, n)} us each")
     end
+  end
+
+  # total / n, to one decimal.
+  defp tenths(total, n) do
+    t = div(total * 10, n)
+    "#{div(t, 10)}.#{rem(t, 10)}"
   end
 
   defp timed(fun) do

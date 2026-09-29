@@ -15,7 +15,8 @@ defmodule Raycaster.EngineTest do
 
   defp frame(player), do: Engine.frame(Engine.grid(), player, @width, @height)
 
-  defp walls(items), do: for({:rect, x, y, w, h, c} <- items, c not in [@ceiling, @floor], do: {x, y, w, h})
+  defp walls(items),
+    do: for({:rect, x, y, w, h, c} <- items, c not in [@ceiling, @floor], do: {x, y, w, h})
 
   # The wall rectangle covering the middle of the screen, which is where the
   # ray runs straight along the player's direction.
@@ -80,10 +81,41 @@ defmodule Raycaster.EngineTest do
         colour
       end
 
-      brightness = fn c -> Bitwise.band(c, 0xFF) + Bitwise.band(Bitwise.bsr(c, 8), 0xFF) + Bitwise.bsr(c, 16) end
+      brightness = fn c ->
+        Bitwise.band(c, 0xFF) + Bitwise.band(Bitwise.bsr(c, 8), 0xFF) + Bitwise.bsr(c, 16)
+      end
 
       # West wall is 0.5 cells away, east wall 13.5.
       assert brightness.(colour_at.(128 * 256)) > brightness.(colour_at.(0))
+    end
+  end
+
+  describe "the fixed tour in Raycaster.Bench" do
+    test "draws exactly the frames it drew before the speed work" do
+      {expected, _binding} = Code.eval_file("test/tour_frames.exs")
+
+      assert Enum.map(Raycaster.Bench.tour(), &frame/1) == expected
+    end
+
+    test "stands only on floor" do
+      grid = Engine.grid()
+
+      for %{x: x, y: y} <- Raycaster.Bench.tour() do
+        assert elem(grid, div(y, @cell) * 16 + div(x, @cell)) == 0
+      end
+    end
+  end
+
+  describe "the map" do
+    # Rays are not bounds checked and have no step limit: the outer wall is what
+    # stops them.
+    test "is closed all the way round" do
+      grid = Engine.grid()
+      border = for i <- 0..15, cell <- [{i, 0}, {i, 15}, {0, i}, {15, i}], uniq: true, do: cell
+
+      for {x, y} <- border do
+        assert elem(grid, y * 16 + x) != 0, "open border cell at #{x},#{y}"
+      end
     end
   end
 
@@ -97,7 +129,11 @@ defmodule Raycaster.EngineTest do
 
     test "turning changes only the angle, at a rate that does not depend on frame time" do
       one = Engine.step(Engine.grid(), Engine.new(), ["Right"], 1000)
-      halves = Enum.reduce(1..10, Engine.new(), fn _, p -> Engine.step(Engine.grid(), p, ["Right"], 100) end)
+
+      halves =
+        Enum.reduce(1..10, Engine.new(), fn _, p ->
+          Engine.step(Engine.grid(), p, ["Right"], 100)
+        end)
 
       assert one.a == 40_000
       assert halves.a == 40_000
@@ -107,7 +143,10 @@ defmodule Raycaster.EngineTest do
     test "walls stop the player, on each axis separately" do
       grid = Engine.grid()
       # Facing west, into the wall column x = 0, for long enough to cross it.
-      west = Enum.reduce(1..50, %{Engine.new() | a: 128 * 256}, fn _, p -> Engine.step(grid, p, ["Up"], 100) end)
+      west =
+        Enum.reduce(1..50, %{Engine.new() | a: 128 * 256}, fn _, p ->
+          Engine.step(grid, p, ["Up"], 100)
+        end)
 
       # Never inside the wall cell (x < 256), with room for the player's radius.
       assert west.x >= @cell + 60
