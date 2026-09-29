@@ -159,6 +159,19 @@ defmodule Raycaster.EngineTest do
       assert slid.y != corner.y
     end
 
+    test "labels as charlists mean the same as binaries" do
+      grid = Engine.grid()
+      # Columns 9 to 14 are open in rows 8 to 10, so every direction can move.
+      start = %{x: 11 * @cell + 128, y: 9 * @cell + 128, a: 0}
+
+      for label <- ["Up", "S", "Q", "E", "D", "Left"] do
+        binary = Engine.step(grid, start, [label], 200)
+
+        assert Engine.step(grid, start, [String.to_charlist(label)], 200) == binary
+        refute binary == start
+      end
+    end
+
     test "no keys held means no movement" do
       assert Engine.step(Engine.grid(), Engine.new(), [], 500) == Engine.new()
     end
