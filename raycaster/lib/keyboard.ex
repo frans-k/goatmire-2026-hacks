@@ -127,25 +127,53 @@ defmodule Raycaster.Keyboard do
 
   defp all_rows(level), do: Enum.each(@rows, fn pin -> GPIO.digital_write(pin, level) end)
 
-  # Drive one row low at a time and see which columns follow it down.
+  # With every row low, a column reads low if any key in it is closed, so one
+  # sweep of the columns says which of them can hold a key at all. Only those
+  # are read again while the rows are driven low one at a time: a key held or
+  # two costs about half the GPIO calls of reading the whole matrix, and each
+  # call is a NIF that takes on the order of 180 us on this chip.
   defp scan do
-    all_rows(:high)
+    case low_columns(@indexed_cols, []) do
+      [] ->
+        []
 
-    keys =
-      Enum.flat_map(@indexed_rows, fn {pin, row} ->
-        GPIO.digital_write(pin, :low)
-        closed = closed_columns(row)
-        GPIO.digital_write(pin, :high)
-
-        closed
-      end)
-
-    all_rows(:low)
-    keys
+      active ->
+        all_rows(:high)
+        keys = scan_rows(@indexed_rows, active, [])
+        all_rows(:low)
+        keys
+    end
   end
 
-  defp closed_columns(row) do
-    for {pin, col} <- @indexed_cols, GPIO.digital_read(pin) == :low, do: {row, col}
+  defp low_columns([], acc), do: acc
+
+  defp low_columns([{pin, _col} = column | rest], acc) do
+    if GPIO.digital_read(pin) == :low do
+      low_columns(rest, [column | acc])
+    else
+      low_columns(rest, acc)
+    end
+  end
+
+  # Drive one row low at a time and see which of the active columns follow it.
+  defp scan_rows([], _active, keys), do: keys
+
+  defp scan_rows([{pin, row} | rows], active, keys) do
+    GPIO.digital_write(pin, :low)
+    keys = closed_columns(active, row, keys)
+    GPIO.digital_write(pin, :high)
+
+    scan_rows(rows, active, keys)
+  end
+
+  defp closed_columns([], _row, keys), do: keys
+
+  defp closed_columns([{pin, col} | rest], row, keys) do
+    if GPIO.digital_read(pin) == :low do
+      closed_columns(rest, row, [{row, col} | keys])
+    else
+      closed_columns(rest, row, keys)
+    end
   end
 
   defp report(owner, event, key) do
