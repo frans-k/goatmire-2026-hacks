@@ -4,13 +4,14 @@
 #
 #     elixir scripts/relay_ghosts.exs ws://localhost:4040 [count] [seconds]
 #
+# If the relay asks for a token: RELAY_TOKEN=... elixir scripts/relay_ghosts.exs ...
+#
 # Defaults to 3 ghosts for 120 seconds. They wander the map, one position a second.
 
 Mix.install([{:websockex, "~> 0.4"}])
 
 Code.require_file("../lib/relay_wire.ex", __DIR__)
 Code.require_file("../lib/engine.ex", __DIR__)
-
 
 {base, count, seconds} =
   case System.argv() do
@@ -49,11 +50,8 @@ defmodule Ghost do
 
     {x, y} = start_at()
 
-    WebSockex.start_link(
-      Raycaster.RelayWire.url(base, chip),
-      __MODULE__,
-      Map.merge(state, %{x: x, y: y})
-    )
+    url = Raycaster.RelayWire.url(base, chip, System.get_env("RELAY_TOKEN"))
+    WebSockex.start_link(url, __MODULE__, Map.merge(state, %{x: x, y: y}))
   end
 
   defp open?(x, y),
@@ -115,7 +113,25 @@ defmodule Ghost do
   def handle_disconnect(_status, state), do: {:ok, state}
 end
 
-ghosts = for n <- 1..count, do: elem(Ghost.start(base, n, self()), 1)
+ghosts =
+  for n <- 1..count do
+    case Ghost.start(base, n, self()) do
+      {:ok, pid} ->
+        pid
+
+      {:error, %{code: 401}} ->
+        IO.puts(
+          :stderr,
+          "the relay wants a token: RELAY_TOKEN=... elixir scripts/relay_ghosts.exs ..."
+        )
+
+        System.halt(1)
+
+      {:error, reason} ->
+        IO.puts(:stderr, "could not connect to #{base}: #{inspect(reason)}")
+        System.halt(1)
+    end
+  end
 
 deadline = System.monotonic_time(:millisecond) + seconds * 1000
 

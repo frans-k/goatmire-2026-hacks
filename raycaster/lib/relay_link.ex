@@ -35,7 +35,12 @@ defmodule Raycaster.RelayLink do
 
     state = %{
       owner: Keyword.fetch!(opts, :owner),
-      url: RelayWire.url(Keyword.fetch!(opts, :base), Keyword.fetch!(opts, :chip)),
+      url:
+        RelayWire.url(
+          Keyword.fetch!(opts, :base),
+          Keyword.fetch!(opts, :chip),
+          Keyword.get(opts, :token)
+        ),
       port: nil,
       # How many times the room has been joined: each join is its own ref.
       joins: 0,

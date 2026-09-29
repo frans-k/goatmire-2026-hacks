@@ -24,6 +24,11 @@ end
 # each one who is where once a second, which is far less for a badge to take in.
 config :raycaster, :relay, System.get_env("RAYCASTER_RELAY")
 
+# The token the relay asks for, if it does (RELAY_TOKEN on the server): letters,
+# digits and -_.~ only. It ends up in the badge's firmware, so it keeps casual
+# visitors out and nobody who reads the firmware.
+config :raycaster, :relay_token, System.get_env("RAYCASTER_RELAY_TOKEN")
+
 # For measuring: RAYCASTER_AUTOPILOT=1 turns on the spot by itself, so every run
 # casts the same views, and RAYCASTER_OFFLINE=1 leaves the network out whatever
 # config_local.exs says. Read while compiling, like the rest.

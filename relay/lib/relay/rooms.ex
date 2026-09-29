@@ -123,6 +123,14 @@ defmodule Relay.Rooms do
     for {member, {^room, slot}} <- state.where, do: {member, slot}
   end
 
+  @doc "How many players there are, in all rooms."
+  @spec count(t) :: non_neg_integer
+  def count(state), do: map_size(state.where)
+
+  @doc "Whether `member` is in a room."
+  @spec member?(t, member) :: boolean
+  def member?(state, member), do: Map.has_key?(state.where, member)
+
   @doc "Every room that has anyone in it."
   @spec rooms(t) :: [pos_integer]
   def rooms(state), do: state.rooms |> Map.keys() |> Enum.sort()

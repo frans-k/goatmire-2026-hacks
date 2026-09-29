@@ -23,7 +23,10 @@ defmodule Relay.Hub do
   @doc "The topic badges join."
   def topic, do: @topic
 
-  @doc "Puts `pid` in a room. Returns `{room, slot, max}`."
+  @doc """
+  Puts `pid` in a room. Returns `{room, slot, max}`, or `{:error, :full}` when the
+  server already holds as many players as `:max_players` allows (200).
+  """
   def join(pid), do: GenServer.call(__MODULE__, {:join, pid})
 
   @doc "Where `pid` stands, as heard now."
@@ -45,10 +48,16 @@ defmodule Relay.Hub do
 
   @impl true
   def handle_call({:join, pid}, _from, state) do
-    {rooms, {room, slot}} = Rooms.join(state.rooms, pid)
-    monitors = Map.put_new_lazy(state.monitors, pid, fn -> Process.monitor(pid) end)
+    cap = Application.get_env(:relay, :max_players, 200)
 
-    {:reply, {room, slot, state.max}, %{state | rooms: rooms, monitors: monitors}}
+    if Rooms.count(state.rooms) >= cap and not Rooms.member?(state.rooms, pid) do
+      {:reply, {:error, :full}, state}
+    else
+      {rooms, {room, slot}} = Rooms.join(state.rooms, pid)
+      monitors = Map.put_new_lazy(state.monitors, pid, fn -> Process.monitor(pid) end)
+
+      {:reply, {room, slot, state.max}, %{state | rooms: rooms, monitors: monitors}}
+    end
   end
 
   def handle_call(:counts, _from, state), do: {:reply, Rooms.counts(state.rooms), state}

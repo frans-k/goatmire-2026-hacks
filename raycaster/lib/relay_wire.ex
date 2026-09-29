@@ -29,9 +29,18 @@ defmodule Raycaster.RelayWire do
   @spec colour(pos_integer) :: non_neg_integer
   def colour(slot), do: elem(@colours, rem(slot - 1, tuple_size(@colours)))
 
-  @doc "Where to connect: a base like `ws://192.168.1.5:4040`, and this badge's chip id."
-  @spec url(binary, binary) :: binary
-  def url(base, chip), do: trim(base) <> @path <> "?vsn=2.0.0&chip=" <> chip <> "&name=raycaster"
+  @doc """
+  Where to connect: a base like `ws://192.168.1.5:4040`, this badge's chip id, and
+  the token the server asks for, if it asks for one. The token goes in the address
+  as it is, so it should be letters, digits and `-_.~`.
+  """
+  @spec url(binary, binary, binary | nil) :: binary
+  def url(base, chip, token \\ nil) do
+    trim(base) <> @path <> "?vsn=2.0.0&chip=" <> chip <> "&name=raycaster" <> token(token)
+  end
+
+  defp token(token) when is_binary(token) and token != "", do: "&token=" <> token
+  defp token(_none), do: ""
 
   @spec join(binary) :: binary
   def join(ref), do: frame(ref, ref, @topic, "phx_join", %{})

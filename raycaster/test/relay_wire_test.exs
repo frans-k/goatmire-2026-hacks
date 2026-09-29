@@ -26,6 +26,16 @@ defmodule Raycaster.RelayWireTest do
                "ws://192.168.1.5:4040/badge/socket/websocket?vsn=2.0.0&chip=A0F262EE6F6C&name=raycaster"
     end
 
+    test "a token, when there is one, goes on the end" do
+      assert RelayWire.url("ws://h:1", "X", "s3cret-1.2_3~") ==
+               RelayWire.url("ws://h:1", "X") <> "&token=s3cret-1.2_3~"
+    end
+
+    test "no token, or an empty one, adds nothing" do
+      assert RelayWire.url("ws://h:1", "X", nil) == RelayWire.url("ws://h:1", "X")
+      assert RelayWire.url("ws://h:1", "X", "") == RelayWire.url("ws://h:1", "X")
+    end
+
     test "a trailing slash on the base is not doubled" do
       assert RelayWire.url("ws://h:1/", "X") == RelayWire.url("ws://h:1", "X")
     end

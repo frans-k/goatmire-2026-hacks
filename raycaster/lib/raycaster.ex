@@ -29,6 +29,7 @@ defmodule Raycaster do
 
   # A relay server instead of MQTT, see config/config.exs.
   @relay Application.compile_env!(:raycaster, :relay)
+  @relay_token Application.compile_env!(:raycaster, :relay_token)
 
   # Turns on the spot by itself, for measuring, see config/config.exs.
   @autopilot Application.compile_env!(:raycaster, :autopilot)
@@ -120,7 +121,7 @@ defmodule Raycaster do
   end
 
   defp link(game, id) when @relay != nil,
-    do: RelayLink.start_link(owner: game, base: @relay, chip: id)
+    do: RelayLink.start_link(owner: game, base: @relay, chip: id, token: @relay_token)
 
   defp link(game, id), do: Link.start_link(owner: game, host: @broker, port: @broker_port, id: id)
 

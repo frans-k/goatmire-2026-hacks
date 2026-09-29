@@ -37,23 +37,19 @@ defmodule Relay.Socket do
   def handle_in(_binary_or_other, state), do: {:ok, state}
 
   defp handle_frame(join_ref, ref, "raycaster:lobby" = topic, "phx_join", _payload, state) do
-    {room, slot, max} = Hub.join(self())
-    reply = ok_reply(join_ref, ref, topic, %{"room" => room, "slot" => slot, "max" => max})
+    case Hub.join(self()) do
+      {room, slot, max} ->
+        reply = ok_reply(join_ref, ref, topic, %{"room" => room, "slot" => slot, "max" => max})
+        {:push, {:text, reply}, %{state | joined: true}}
 
-    {:push, {:text, reply}, %{state | joined: true}}
+      {:error, :full} ->
+        reply = error_reply(join_ref, ref, topic, "full")
+        {:push, {:text, reply}, state}
+    end
   end
 
   defp handle_frame(join_ref, ref, topic, "phx_join", _payload, state) do
-    reply =
-      JSON.encode!([
-        join_ref,
-        ref,
-        topic,
-        "phx_reply",
-        %{"status" => "error", "response" => %{"reason" => "unknown topic"}}
-      ])
-
-    {:push, {:text, reply}, state}
+    {:push, {:text, error_reply(join_ref, ref, topic, "unknown topic")}, state}
   end
 
   defp handle_frame(
@@ -87,6 +83,16 @@ defmodule Relay.Socket do
   def terminate(_reason, _state) do
     Hub.leave(self())
     :ok
+  end
+
+  defp error_reply(join_ref, ref, topic, reason) do
+    JSON.encode!([
+      join_ref,
+      ref,
+      topic,
+      "phx_reply",
+      %{"status" => "error", "response" => %{"reason" => reason}}
+    ])
   end
 
   defp ok_reply(join_ref, ref, topic, response) do

@@ -4,7 +4,7 @@ defmodule Relay.Client do
 
   @url "ws://127.0.0.1:4041/badge/socket/websocket?vsn=2.0.0&chip=TEST&name=test"
 
-  def start, do: WebSockex.start_link(@url, __MODULE__, self())
+  def start(extra \\ ""), do: WebSockex.start_link(@url <> extra, __MODULE__, self())
 
   def push(client, frame), do: WebSockex.send_frame(client, {:text, JSON.encode!(frame)})
   def push_raw(client, text), do: WebSockex.send_frame(client, {:text, text})
@@ -171,5 +171,105 @@ defmodule Relay.RelayTest do
     assert_receive {:frame, ^a, ["1", "2", @topic, "phx_reply", %{"status" => "ok"}]}, 1_000
     Process.sleep(100)
     assert Relay.Hub.counts() == []
+  end
+
+  describe "what is not a websocket" do
+    defp http_get(path) do
+      {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", 4041, [:binary, active: false])
+      :ok = :gen_tcp.send(socket, "GET #{path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+      {:ok, reply} = :gen_tcp.recv(socket, 0, 2_000)
+      :gen_tcp.close(socket)
+      reply
+    end
+
+    test "a plain request to the badge path is told to upgrade, not given an error" do
+      assert "HTTP/1.1 426" <> _ = http_get("/badge/socket/websocket")
+    end
+
+    test "the status page answers, and anything else is not found" do
+      assert "HTTP/1.1 200" <> _ = http_get("/")
+      assert "HTTP/1.1 404" <> _ = http_get("/nothing/here")
+    end
+  end
+
+  describe "a token, when the server has one" do
+    setup do
+      Application.put_env(:relay, :token, "s3cret")
+      on_exit(fn -> Application.delete_env(:relay, :token) end)
+    end
+
+    test "a badge without it is refused" do
+      Process.flag(:trap_exit, true)
+
+      assert {:error, %WebSockex.RequestError{code: 401}} = Client.start()
+    end
+
+    test "so is one with the wrong token, and one with a token of another length" do
+      Process.flag(:trap_exit, true)
+
+      assert {:error, %WebSockex.RequestError{code: 401}} = Client.start("&token=wrong!")
+      assert {:error, %WebSockex.RequestError{code: 401}} = Client.start("&token=s3cre")
+      assert {:error, %WebSockex.RequestError{code: 401}} = Client.start("&token=")
+    end
+
+    test "one with the token joins as usual" do
+      {:ok, client} = Client.start("&token=s3cret")
+
+      assert %{"room" => 1, "slot" => 1} = join(client)
+    end
+
+    test "and refusing one leaves nobody in a room" do
+      Process.flag(:trap_exit, true)
+      Client.start("&token=nope")
+      Process.sleep(100)
+
+      assert Relay.Hub.counts() == []
+    end
+  end
+
+  describe "the most players the server holds" do
+    setup do
+      Application.put_env(:relay, :max_players, 2)
+      on_exit(fn -> Application.delete_env(:relay, :max_players) end)
+    end
+
+    test "the one past it is told the server is full, and the others are not disturbed" do
+      a = connect()
+      %{"slot" => 1} = join(a)
+      b = connect()
+      %{"slot" => 2} = join(b)
+      c = connect()
+
+      Client.push(c, ["9", "9", @topic, "phx_join", %{}])
+
+      assert_receive {:frame, ^c,
+                      [
+                        "9",
+                        "9",
+                        @topic,
+                        "phx_reply",
+                        %{"status" => "error", "response" => %{"reason" => "full"}}
+                      ]},
+                     1_000
+
+      assert Relay.Hub.counts() == [{1, 2}]
+
+      Client.push(a, [nil, nil, @topic, "pos", %{"x" => 7, "y" => 8}])
+      assert snapshot_where(b, &(&1 == [[1, 7, 8]])) == [[1, 7, 8]]
+    end
+
+    test "a place opens up again when someone leaves" do
+      a = connect()
+      join(a)
+      b = connect()
+      join(b)
+      c = connect()
+
+      Client.push(a, ["1", "2", @topic, "phx_leave", %{}])
+      assert_receive {:frame, ^a, ["1", "2", @topic, "phx_reply", _]}, 1_000
+      Process.sleep(100)
+
+      assert %{"slot" => 1} = join(c)
+    end
   end
 end
