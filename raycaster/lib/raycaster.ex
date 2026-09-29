@@ -18,6 +18,13 @@ defmodule Raycaster do
 
   @report_ms 1000
 
+  # The shortest time between frames. AtomGL answers a frame as soon as it is
+  # queued, not when it has been drawn, and keeps up to 32. A game that casts
+  # faster than the panel draws fills that queue and the screen shows what
+  # happened a second ago. Holding the game back to a rate the panel can keep
+  # up with keeps the queue empty, so a key you let go of stops at once.
+  @min_frame_ms 50
+
   def start do
     {:ok, scene} = Screen.start()
     {:ok, _keyboard} = Keyboard.start_link()
@@ -53,6 +60,7 @@ defmodule Raycaster do
     shown(stats.showing)
     t2 = now()
     send(presenter, {:frame, self(), [hud(stats.hud) | items]})
+    pace(@min_frame_ms - (now() - t0))
 
     stats = %{
       stats
@@ -65,6 +73,15 @@ defmodule Raycaster do
 
     loop(presenter, grid, player, held, t0, report(stats, t2, length(items)))
   end
+
+  defp pace(ms) when ms > 0 do
+    receive do
+    after
+      ms -> :ok
+    end
+  end
+
+  defp pace(_ms), do: :ok
 
   defp shown(false), do: :ok
   defp shown(true), do: receive(do: (:shown -> :ok))

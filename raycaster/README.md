@@ -72,9 +72,12 @@ with the view, and the frame rate you get in play is the walking one.
 
 Three things fall out of this.
 
-**The display is not the bottleneck.** Pushing a frame takes about 10 ms. Casting
-rays is around 85% of every frame, so the number of columns is the frame rate
-knob (`@cols` in `lib/engine.ex`).
+**Casting is the cost, but the frame rate you read is not what you see.** Pushing
+a frame takes about 10 ms, and casting rays is around 85% of every frame, so the
+number of columns is the frame rate knob (`@cols` in `lib/engine.ex`). But on the
+badge VM AtomGL answers a frame when it is *queued*, not when it is drawn, so
+that 10 ms is the enqueue, and the fps line counts frames made, not frames shown.
+See "Frames queued behind the panel" below.
 
 **AtomVM copies a module literal onto the heap every time it is used.** The first
 version read the map from a module attribute (`@grid`) for every step of every
@@ -161,6 +164,21 @@ steady walking read 20 to 24 fps, against 16 to 22. The chip is simply busy
 now; the keyboard scan is the biggest thing left that is not drawing.
 With two schedulers the keyboard scan could have run on the other core, yet
 walking still halved the frame rate, so something in the scan holds up both.
+
+### Frames queued behind the panel
+
+Walking looked like 22 fps but the view kept moving for about a second after
+releasing a key. AtomGL pre-acknowledges a frame when it is put on its queue
+(32 deep, oldest dropped), so `GenServer.call` returns long before the panel has
+drawn it, and a game that casts faster than the panel draws just fills the queue
+and shows the past. The panel was also on the driver's default 40 MHz, where
+moving a frame takes about 31 ms by itself; the badge firmware runs it at 80 MHz.
+
+Now `Screen` asks for 80 MHz and the game keeps at least `@min_frame_ms` (50)
+between frames. Casting got cheaper too, 31 ms while walking against 38, and
+walking reads up to 18 fps. The trail is much shorter but not gone: the real
+time the panel takes per frame was never measured, only inferred from the source
+and the feel, so 50 ms is a guess. Raise it for less trail, lower it for more fps.
 
 ## Why not real Doom?
 
