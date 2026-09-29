@@ -91,6 +91,30 @@ is why 80 columns cannot reach 15 frames per second.
 the tests use, five frames per view, which is the number to compare when
 changing the engine.
 
+### After shortening the ray loop
+
+Measured later, on AtomVM 0.8.0-dev. The micro-benchmarks came out faster than
+above on this firmware (3 us for an empty loop, 10 us for a nine argument
+call), so compare within this table rather than with the one above.
+
+| | ray casting | display push | frames per second |
+|---|---|---|---|
+| Fixed tour, engine before the change | 41.8 ms | | |
+| Fixed tour, engine after the change | 27.0 ms | | |
+| Game, standing still | 26 to 31 ms | 7 to 10 ms | redraws once a second |
+| Game, walking around | 55 to 84 ms | 9 to 14 ms | 2 to 13, 9 to 13 while walking steadily |
+
+The renderer is 1.55 times faster and every view in the tour gained. Walking
+did not get faster, and the reason is the keyboard, not the renderer: while a
+key is held, `Raycaster.Keyboard` rescans the matrix every 20 ms, and one scan
+took 18 to 22 ms (timed on the badge). The scanner and the game share the
+chip, so the game gets about half of it and a walking frame takes twice as
+long as a standing one. `ray` in the log is wall clock time, which is why the
+scanning shows up there.
+
+`Engine.step/4` also costs 3.2 ms a frame standing still and about 6 ms
+walking, mostly the key lists it reads as literals.
+
 ## Why not real Doom?
 
 The question this started from: how do people run Doom on odd hardware, and can
@@ -127,8 +151,7 @@ group.
 
 **Speed**
 
-Done, but not yet measured on the badge (the tour in `lib/bench.ex` is the
-measurement to make):
+Done, and measured above (the fixed tour went from 41.8 to 27.0 ms a frame):
 
 - The ray step loop is 6 BEAM instructions instead of about 37. The bounds
   check and the step limit are gone, because the map's outer wall stops every
@@ -147,7 +170,13 @@ Next:
   instructions, mostly saving and restoring registers around the calls, against
   6 per ray step. Fewer calls and fewer live variables per column is the next
   thing to try.
-- `step/4` still reads six small key lists as literals per frame.
+- The keyboard scan takes about half the chip while a key is held (see above).
+  Scanning less often, only the rows with game keys, or with less work per row
+  would give it back. Left for now, because the input may change.
+- `step/4` costs 3 to 6 ms a frame, mostly six small key lists read as
+  literals.
+- The fps line reads "0 fps" standing still: one frame in just over a second
+  rounds down.
 - Overlap the display push with casting the next frame, and find out whether
   AtomVM runs two schedulers on this dual core chip
   (`:erlang.system_info(:schedulers_online)`). If it does, cast the two halves
