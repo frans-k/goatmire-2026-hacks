@@ -4,8 +4,8 @@ A Wolfenstein-style 3D view in pure Elixir, running on the Goatmire 2026 badge
 under [AtomVM](https://atomvm.org). Walk around a small map with the badge
 keyboard: arrows or W A S D to move and turn, Q and E to strafe.
 
-It runs at 12 to 13 frames per second at 320x240, drawn as about 30 rectangles
-per frame. No native code, no firmware changes: AtomVM stays the platform.
+It runs at about 10 frames per second at 320x240 (7 to 13, depending on what
+you are looking at), drawn as 15 to 40 rectangles per frame. No native code, no firmware changes: AtomVM stays the platform.
 
 ## Run it
 
@@ -54,11 +54,13 @@ screen and the call time is the display time.
 |---|---|---|---|
 | 80 columns, map looked up as a module attribute | 308 ms | 11 ms | 3 |
 | 80 columns, map passed as an argument | 128 ms | 11 ms | 7 |
-| 40 columns | 66 ms | 10 ms | 12 to 13 |
+| 40 columns, standing still | 66 ms | 10 ms | 12 to 13 |
+| 40 columns, walking around | 61 to 111 ms | 8 to 12 ms | 7 to 13, about 10 on average |
 
-These were read with the player standing at the spawn point looking down the
-longest corridor. Ray cost depends on how far the rays travel, so the numbers
-move with the view.
+The first three rows were read standing at the spawn point, looking down the
+longest corridor. The walking row is 29 one-second samples while moving and
+turning around the map. Ray cost depends on how far the rays travel, so it moves
+with the view, and the frame rate you get in play is the walking one.
 
 Three things fall out of this.
 

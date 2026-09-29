@@ -14,7 +14,8 @@ defmodule Raycaster.Engine do
 
   # Vertical slices across the screen. Ray casting is nearly all of the frame
   # time and costs the same per slice, so this is the frame rate knob: 80 slices
-  # ran at 7 fps on the badge, 40 at 12-13. It must divide the screen width.
+  # ran at 7 fps on the badge standing still, 40 at 12-13 (about 10 while
+  # walking). It must divide the screen width.
   @cols 40
   @far 1 <<< 28
   @max_steps 32
