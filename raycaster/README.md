@@ -252,6 +252,46 @@ frame, so twelve moving at once (the most it keeps track of) would hurt.
 Figures are hidden by a walk along the line to them, a quarter cell at a time, not
 by a ray per column, so someone half behind a corner is either seen or not.
 
+### With a relay server instead of MQTT
+
+MQTT makes every badge take in every other badge's messages, and each one costs
+about ten milliseconds. `../relay` moves that to a server: a small websocket server
+(`cd ../relay && mix run --no-halt`, port 4040) that speaks the part of Phoenix
+channels the badge firmware's chat already does. A badge joins `raycaster:lobby`
+and is put in a room of at most eight by itself (a new room is made when every one
+is full, so nobody is refused), tells the server where it stands once a second, and
+is sent **one snapshot a second** of everyone in its room, however many they are.
+Positions jump; that is the price.
+
+Build with `RAYCASTER_RELAY=ws://<host>:4040` to use it (read while compiling, like
+the wifi):
+
+```sh
+RAYCASTER_RELAY=ws://192.168.1.5:4040 mix atomvm.esp32.flash
+elixir scripts/relay_ghosts.exs ws://localhost:4040 3 120   # three ghosts
+```
+
+Same test as above, turning on the spot, 8 others:
+
+| | fps | ray casting | drawing |
+|---|---|---|---|
+| alone, no network | 19.2 | 25.4 ms | 49.8 ms |
+| MQTT, nobody else | 17.2 | 29.4 ms | 53.7 ms |
+| MQTT, 8 others (2 updates a second) | 13.2 | 54.0 ms | 65.5 ms |
+| relay, nobody else | 17.5 | 30.5 ms | 52.3 ms |
+| relay, 8 others | 16.3 | 39.2 ms | 54.1 ms |
+
+What is left with 8 others is drawing them, about a millisecond each, since a figure
+that could be seen costs a walk along the line to it, and one off to the side is
+skipped before that.
+
+The relay listens on all addresses with no authentication, so it should only be
+reachable by the badges: it checks that a position is a whole number inside the map
+and takes at most one from a badge every 200 ms, and answers nothing it does not
+understand, but anyone who can reach it can join. The badge needs the relay's
+address to be reachable from its wifi: the Mac's `en0` address on a shared hotspot
+worked; the relay is not exposed anywhere else.
+
 ### In the official badge firmware
 
 **It does not fit yet.** The firmware's `main.avm` slot is 671,744 bytes and its

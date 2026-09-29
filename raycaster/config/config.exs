@@ -19,6 +19,11 @@ if File.exists?(Path.join(__DIR__, "config_local.exs")) do
   import_config("config_local.exs")
 end
 
+# Use a relay server (see relay/) instead of MQTT: RAYCASTER_RELAY=ws://host:4040,
+# read while compiling. The relay puts badges in rooms of eight by itself and tells
+# each one who is where once a second, which is far less for a badge to take in.
+config :raycaster, :relay, System.get_env("RAYCASTER_RELAY")
+
 # For measuring: RAYCASTER_AUTOPILOT=1 turns on the spot by itself, so every run
 # casts the same views, and RAYCASTER_OFFLINE=1 leaves the network out whatever
 # config_local.exs says. Read while compiling, like the rest.

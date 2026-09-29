@@ -27,6 +27,12 @@ defmodule Raycaster.MixProject do
       # list whenever a callback returns one. From git, because the published
       # Hex package ships no build config.
       {:avm_scene, github: "atomvm/avm_scene"},
+      # The Erlang side of the websocket port driver built into the badge VM, for
+      # talking to the relay server. The same pin the badge firmware uses.
+      {:atomvm_websocket_client,
+       github: "nerves-hub/atomvm_websocket_client",
+       ref: "011b99c30bea5253eb29558e3c6ac420a5472c0f",
+       manager: :rebar3},
       # MQTT 3.1.1 client in plain Erlang, for finding the other players.
       {:amqtt_client,
        github: "atomvm/amqtt",

@@ -209,16 +209,24 @@ defmodule Raycaster.Engine do
     depth = div(plane_x * rel_y - plane_y * rel_x, det)
     across = div(dir_y * rel_x - dir_x * rel_y, det)
 
-    acc =
-      if depth >= @nearest and visible?(grid, x, y, ox, oy) do
-        centre = div(width * (depth + across), 2 * depth)
-        line = div(height * 256, depth)
-        add_figure(acc, depth, centre, line, colour, width, height)
-      else
-        acc
-      end
+    acc = if depth >= @nearest, do: seen(acc, view, ox, oy, depth, across, colour), else: acc
 
     figures(view, rest, acc)
+  end
+
+  # Off to the side of the view costs nothing: the walk along the line to a figure
+  # is only made for one that could be seen, which is a fraction of them.
+  defp seen(acc, view, ox, oy, depth, across, colour) do
+    {grid, x, y, _dir_x, _dir_y, _plane_x, _plane_y, _det, width, height} = view
+
+    centre = div(width * (depth + across), 2 * depth)
+    line = div(height * 256, depth)
+
+    if centre + line > 0 and centre - line < width and visible?(grid, x, y, ox, oy) do
+      add_figure(acc, depth, centre, line, colour, width, height)
+    else
+      acc
+    end
   end
 
   # `line` is how tall a wall would be at this distance. A figure is 6/10 of it,

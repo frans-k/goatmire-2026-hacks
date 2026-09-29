@@ -19,13 +19,16 @@ defmodule Raycaster do
   game starts at once either way: wifi is joined in a process of its own.
   """
 
-  alias Raycaster.{Engine, Keyboard, Link, Peers, Screen, Wifi, Wire}
+  alias Raycaster.{Engine, Keyboard, Link, Peers, RelayLink, RelayWire, Screen, Wifi, Wire}
 
   # Read while compiling on the laptop: the badge never sees Application at all.
   @ssid Application.compile_env!(:raycaster, [:wifi, :ssid])
   @psk Application.compile_env!(:raycaster, [:wifi, :psk])
   @broker Application.compile_env!(:raycaster, [:mqtt, :host])
   @broker_port Application.compile_env!(:raycaster, [:mqtt, :port])
+
+  # A relay server instead of MQTT, see config/config.exs.
+  @relay Application.compile_env!(:raycaster, :relay)
 
   # Turns on the spot by itself, for measuring, see config/config.exs.
   @autopilot Application.compile_env!(:raycaster, :autopilot)
@@ -57,9 +60,11 @@ defmodule Raycaster do
     IO.puts("raycaster: badge #{id}")
 
     net = %{
+      kind: if(@relay == nil, do: :mqtt, else: :relay),
       link: nil,
       up: false,
       peers: Peers.new(),
+      others: [],
       id: id,
       colour: Wire.colour(chip),
       sent: nil
@@ -78,6 +83,7 @@ defmodule Raycaster do
       hud: "",
       drawn: nil,
       peers: nil,
+      others: nil,
       showing: false
     }
 
@@ -107,17 +113,22 @@ defmodule Raycaster do
   end
 
   defp start_link(game, id) do
-    case Link.start_link(owner: game, host: @broker, port: @broker_port, id: id) do
+    case link(game, id) do
       {:ok, link} -> send(game, {:link_pid, link})
       other -> IO.puts("MQTT link did not start: #{inspect(other)}")
     end
   end
 
+  defp link(game, id) when @relay != nil,
+    do: RelayLink.start_link(owner: game, base: @relay, chip: id)
+
+  defp link(game, id), do: Link.start_link(owner: game, host: @broker, port: @broker_port, id: id)
+
   # Says why the link died, if it does, and starts it again a little later.
   defp watch(game, id) do
     receive do
       {:EXIT, pid, reason} ->
-        IO.puts("MQTT link #{inspect(pid)} died: #{inspect(reason)}")
+        IO.puts("Network link #{inspect(pid)} died: #{inspect(reason)}")
         send(game, {:link, :down})
         :timer.sleep(5_000)
         start_link(game, id)
@@ -127,6 +138,9 @@ defmodule Raycaster do
         watch(game, id)
     end
   end
+
+  defp figures([]), do: []
+  defp figures([{slot, x, y} | rest]), do: [{x, y, RelayWire.colour(slot)} | figures(rest)]
 
   defp chip_id do
     case :esp.get_default_mac() do
@@ -149,6 +163,7 @@ defmodule Raycaster do
 
     {held, last, net} =
       if held == [] and player == stats.drawn and net.peers == stats.peers and
+           net.others == stats.others and
            not Peers.moving?(net.peers, now()) do
         idle(stats.at + @report_ms - now(), net)
       else
@@ -159,7 +174,7 @@ defmodule Raycaster do
     player = Engine.step(grid, player, held, t0 - last)
     net = announce(%{net | peers: Peers.expire(net.peers, t0)}, player, held, t0)
 
-    others = Peers.others(net.peers, t0)
+    others = if net.kind == :relay, do: net.others, else: Peers.others(net.peers, t0)
     items = Engine.sprites(grid, player, others, Screen.width(), Screen.height())
     items = items ++ Engine.frame(grid, player, Screen.width(), Screen.height())
     t1 = now()
@@ -178,6 +193,7 @@ defmodule Raycaster do
         draw: stats.draw + draw,
         drawn: player,
         peers: net.peers,
+        others: net.others,
         showing: true
     }
 
@@ -187,10 +203,10 @@ defmodule Raycaster do
   # Says where we are, when it is time: often while walking, now and then while
   # standing so that nobody forgets us.
   defp announce(%{up: true, link: link} = net, player, held, now) when link != nil do
-    gap = if held == [], do: @heartbeat_ms, else: @moving_ms
+    gap = if held == [], do: gap(net.kind, :standing), else: gap(net.kind, :moving)
 
     if net.sent == nil or now - net.sent >= gap do
-      Link.publish(link, Wire.encode(player, net.colour))
+      publish(net.kind, link, player, net.colour)
       %{net | sent: now}
     else
       net
@@ -198,6 +214,18 @@ defmodule Raycaster do
   end
 
   defp announce(net, _player, _held, _now), do: net
+
+  # The relay hands out one snapshot a tick and forgets a badge that is quiet for
+  # five seconds, so a badge need say little.
+  defp gap(:relay, _how), do: 1_000
+  defp gap(:mqtt, :moving), do: @moving_ms
+  defp gap(:mqtt, :standing), do: @heartbeat_ms
+
+  defp publish(:relay, link, player, _colour), do: RelayLink.publish(link, player.x, player.y)
+  defp publish(:mqtt, link, player, colour), do: Link.publish(link, Wire.encode(player, colour))
+
+  defp status(%{up: true, kind: :relay, others: others}),
+    do: line("online, #{length(others) + 1} playing")
 
   defp status(%{up: true, peers: peers}), do: line("online, #{Peers.count(peers) + 1} playing")
   defp status(%{link: nil}), do: line(if @ssid == nil, do: "offline", else: "joining wifi")
@@ -238,6 +266,7 @@ defmodule Raycaster do
       {:link, _status} = message -> {[], now(), heard(message, net)}
       {:peer, _id, _pose} = message -> {[], now(), heard(message, net)}
       {:gone, _id} = message -> {[], now(), heard(message, net)}
+      {:players, _list} = message -> {[], now(), heard(message, net)}
     after
       max(timeout, 0) -> {[], now(), net}
     end
@@ -254,6 +283,7 @@ defmodule Raycaster do
       {:link, _status} = message -> drain(held, heard(message, net))
       {:peer, _id, _pose} = message -> drain(held, heard(message, net))
       {:gone, _id} = message -> drain(held, heard(message, net))
+      {:players, _list} = message -> drain(held, heard(message, net))
     after
       0 -> {held, net}
     end
@@ -261,7 +291,11 @@ defmodule Raycaster do
 
   defp heard({:link_pid, link}, net), do: %{net | link: link}
   defp heard({:link, :up}, net), do: %{net | up: true, sent: nil}
-  defp heard({:link, :down}, net), do: %{net | up: false, peers: Peers.new()}
+  defp heard({:link, :down}, net), do: %{net | up: false, peers: Peers.new(), others: []}
+
+  # The relay's snapshot is everyone else in the room, ready to draw: a slot is a
+  # colour, and there is nothing to carry along and nothing to expire.
+  defp heard({:players, players}, net), do: %{net | others: figures(players)}
   defp heard({:peer, id, pose}, net), do: %{net | peers: Peers.put(net.peers, id, pose, now())}
   defp heard({:gone, id}, net), do: %{net | peers: Peers.drop(net.peers, id)}
 
