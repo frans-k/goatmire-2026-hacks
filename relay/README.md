@@ -109,7 +109,7 @@ with it.
 - It **wanders** at 350 (a badge walks at 800, in the same fixed point per second)
   to one random open cell after another, the shortest way through the cells.
 - It **hunts** the nearest player it can see within eight cells, straight at them at
-  600, rounding a corner if the straight line would clip one. It sees along the same
+  450, rounding a corner if the straight line would clip one. It sees along the same
   quarter cell walk a badge uses to hide figures, so it sees you when you could see
   it.
 - When it loses sight of them it **searches**: it goes to where it last saw them and

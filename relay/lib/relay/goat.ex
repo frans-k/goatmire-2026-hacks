@@ -19,7 +19,7 @@ defmodule Relay.Goat do
   alias Relay.Level
 
   @wander_speed 350
-  @hunt_speed 600
+  @hunt_speed 450
   # How far it sees: eight cells.
   @sight 2_048
   @reach 128

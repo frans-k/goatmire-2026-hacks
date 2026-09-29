@@ -98,10 +98,10 @@ defmodule Relay.GoatTest do
   test "searching, it walks round a wall to where it lost them" do
     # From (7, 2) to (2, 2), with the wall at (3..6, 2) between: up, along row 1,
     # and down, about seven cells, never through the wall.
-    goat = %{Goat.new({7, 2}, 1) | mode: :search, goal: at(2, 2), lost_at: 0}
+    goat = %{Goat.new({7, 2}, 1) | mode: :search, goal: at(2, 2), lost_at: 1_000}
 
     goat =
-      Enum.reduce(1..35, goat, fn i, goat ->
+      Enum.reduce(1..45, goat, fn i, goat ->
         {goat, []} = Goat.step(goat, [], 100, i * 100)
         assert Level.open?(goat.x, goat.y)
         goat
