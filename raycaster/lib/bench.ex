@@ -34,6 +34,7 @@ defmodule Raycaster.Bench do
 
   # Each view is drawn this many times and the average kept.
   @frames 5
+  @steps 200
 
   # A 256 entry tuple like the raycaster's map and sine table.
   @table List.to_tuple(Enum.to_list(0..255))
@@ -47,8 +48,26 @@ defmodule Raycaster.Bench do
 
   def start do
     frames()
+    steps()
     cores()
     micro()
+  end
+
+  # Engine.step/4 runs once a frame too, before the frame is cast.
+  defp steps do
+    grid = Engine.grid()
+
+    for held <- [[], ["W", "D"]] do
+      ms = timed(fn -> step(grid, Engine.new(), held, @steps) end)
+      IO.puts("step, holding #{inspect(held)}: #{tenths(ms * 1000, @steps)} us")
+    end
+  end
+
+  defp step(_grid, _player, _held, 0), do: :ok
+
+  defp step(grid, player, held, n) do
+    Engine.step(grid, player, held, 30)
+    step(grid, player, held, n - 1)
   end
 
   # Raycaster.Engine.frame/4 casts half the screen in a second process, which

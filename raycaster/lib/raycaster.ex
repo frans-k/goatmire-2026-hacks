@@ -6,6 +6,10 @@ defmodule Raycaster do
   frames per second and where the time went (casting rays, or waiting for the
   display), and shows the same on screen.
 
+  The display takes a frame in a process of its own, `present/1`, so the next
+  frame is cast while the last one is still going out. The game only waits
+  when it has a new frame ready before the display has finished the last.
+
   With no key held and the view already on screen, it draws nothing and waits
   for a key, redrawing once a second only to update that line.
   """
@@ -24,12 +28,14 @@ defmodule Raycaster do
     # it is used, so looking the map up per frame (or per ray step) is ruinous.
     grid = Engine.grid()
 
+    presenter = spawn_link(fn -> present(scene) end)
+
     now = now()
-    stats = %{at: now, frames: 0, ray: 0, push: 0, hud: "", drawn: nil}
-    loop(scene, grid, Engine.new(), [], now, stats)
+    stats = %{at: now, frames: 0, ray: 0, wait: 0, hud: "", drawn: nil, showing: false}
+    loop(presenter, grid, Engine.new(), [], now, stats)
   end
 
-  defp loop(scene, grid, player, held, last, stats) do
+  defp loop(presenter, grid, player, held, last, stats) do
     {held, last} =
       case drain(held) do
         [] when player == stats.drawn -> idle(stats.at + @report_ms - now())
@@ -42,18 +48,36 @@ defmodule Raycaster do
     items = Engine.frame(grid, player, Screen.width(), Screen.height())
     t1 = now()
 
-    :ok = GenServer.call(scene, {:frame, [hud(stats.hud) | items]}, 5_000)
+    # One frame at a time goes to the display: wait for the last one if it is
+    # still going out.
+    shown(stats.showing)
     t2 = now()
+    send(presenter, {:frame, self(), [hud(stats.hud) | items]})
 
     stats = %{
       stats
       | frames: stats.frames + 1,
         ray: stats.ray + t1 - t0,
-        push: stats.push + t2 - t1,
-        drawn: player
+        wait: stats.wait + t2 - t1,
+        drawn: player,
+        showing: true
     }
 
-    loop(scene, grid, player, held, t0, report(stats, t2, length(items)))
+    loop(presenter, grid, player, held, t0, report(stats, t2, length(items)))
+  end
+
+  defp shown(false), do: :ok
+  defp shown(true), do: receive(do: (:shown -> :ok))
+
+  # avm_scene answers the call only once the display has taken the frame, so
+  # :shown means the next one can be sent.
+  defp present(scene) do
+    receive do
+      {:frame, from, items} ->
+        :ok = GenServer.call(scene, {:frame, items}, 5_000)
+        send(from, :shown)
+        present(scene)
+    end
   end
 
   # Nothing to draw until a key goes down, or until the line in the corner is
@@ -78,13 +102,16 @@ defmodule Raycaster do
   end
 
   defp report(%{frames: frames} = stats, now, rects) when now - stats.at >= @report_ms do
-    fps = div(frames * 1000, now - stats.at)
+    # Rounded, so that standing still (one frame in a little over a second)
+    # reads 1 and not 0.
+    elapsed = now - stats.at
+    fps = div(frames * 1000 + div(elapsed, 2), elapsed)
     ray = div(stats.ray * 10, max(frames, 1))
-    push = div(stats.push * 10, max(frames, 1))
-    line = "#{fps} fps  ray #{tenths(ray)} ms  push #{tenths(push)} ms  #{rects} rects"
+    wait = div(stats.wait * 10, max(frames, 1))
+    line = "#{fps} fps  ray #{tenths(ray)} ms  wait #{tenths(wait)} ms  #{rects} rects"
 
     IO.puts(line)
-    %{stats | at: now, frames: 0, ray: 0, push: 0, hud: line}
+    %{stats | at: now, frames: 0, ray: 0, wait: 0, hud: line}
   end
 
   defp report(stats, _now, _rects), do: stats

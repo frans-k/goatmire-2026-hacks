@@ -26,13 +26,14 @@ change meant only to be faster has to draw exactly the same picture.
 The monitor prints, once a second:
 
 ```text
-12 fps  ray 66.1 ms  push 9.7 ms  30 rects
+23 fps  ray 36.4 ms  wait 1.9 ms  20 rects
 ```
 
-`ray` is time spent casting rays and building the display list, `push` is time
-the display took to accept the frame. The same line is drawn in the top corner.
-Standing still with no key held, nothing is redrawn except that line, once a
-second, so it reads 1 fps.
+`ray` is time spent casting rays and building the display list. The display
+takes each frame in a process of its own while the next is cast, and `wait` is
+how long the game still had to wait for it before sending the next. The same
+line is drawn in the top corner. Standing still with no key held, nothing is
+redrawn except that line, once a second, so it reads 1 fps.
 
 ## How it works
 
@@ -48,10 +49,12 @@ Everything is integers. Positions are Q8 fixed point (256 is one map cell),
 angles are 65536 to a turn, and the sine table is built while compiling on the
 laptop.
 
-`lib/scene.ex` pushes whatever list it is handed. The game loop asks with a
-`GenServer.call`, and [avm_scene](https://github.com/atomvm/avm_scene) answers
-only after the display has taken the list, so the loop can never run ahead of the
-screen and the call time is the display time.
+`lib/scene.ex` pushes whatever list it is handed. A small process in
+`lib/raycaster.ex` hands it each frame with a `GenServer.call`, which
+[avm_scene](https://github.com/atomvm/avm_scene) answers only after the display
+has taken the list. The game casts the next frame meanwhile, and waits for that
+answer before sending another, so it can never run more than one frame ahead of
+the screen.
 
 ## What I measured on the badge
 
@@ -141,6 +144,21 @@ casts in 27 to 35 ms most of the time (up to 57), because the keyboard scan
 still takes its share, and the push stays at about 10 ms. Seconds of steady
 walking read 16 to 22 fps, where they read 11 to 13 before; seconds with
 stops in them read lower, since standing still redraws only once a second.
+
+### Taking the display push off the game's path
+
+Two more changes. `Engine.step/4` read its keys from lists of labels, which
+are module literals, through `Enum.any?`: 3.0 ms a frame with nothing held on
+the bench. It now matches the labels in function heads and keeps a bit per
+direction: 1.06 ms with nothing held, 1.79 ms holding two keys.
+
+And the display now takes each frame in a process of its own while the next
+frame is cast, instead of the game waiting about 10 ms for it. The game now
+waits 1.5 to 2.5 ms for the display. But pushing a frame costs CPU, not just
+time on the wire, and both cores are already casting, so the rays got slower
+by about as much: 33 to 41 ms while walking, against 27 to 35. Seconds of
+steady walking read 20 to 24 fps, against 16 to 22. The chip is simply busy
+now; the keyboard scan is the biggest thing left that is not drawing.
 With two schedulers the keyboard scan could have run on the other core, yet
 walking still halved the frame rate, so something in the scan holds up both.
 
@@ -197,18 +215,14 @@ Next:
 - The column setup was trimmed (21.0 ms a frame, see above). What is left per
   column is mostly the arithmetic itself; a table of shaded colours passed in
   like the map would save the shading, perhaps 10%.
-- The keyboard scan takes about half the chip while a key is held (see above).
+- The keyboard scan takes about half the chip while a key is held (see above),
+  and with both cores busy drawing it is now the biggest cost left.
   Scanning less often, only the rows with game keys, or with less work per row
   would give it back. Left for now, because the input may change.
-- `step/4` costs 3 to 6 ms a frame, mostly six small key lists read as
-  literals.
-- The fps line reads "0 fps" standing still: one frame in just over a second
-  rounds down.
 - The second process is spawned afresh every frame, which copies the map into
   it each time. A worker that lives for the whole game and keeps its own copy
   of the map could get closer to the 1.5 times two processes allow, perhaps
   1 ms a frame.
-- Overlap the display push with casting the next frame.
 - Draw at 40 columns while moving and 80 while standing still. `@cols` is a
   module attribute today, so it would have to become an argument.
 
