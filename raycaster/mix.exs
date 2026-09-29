@@ -7,6 +7,8 @@ defmodule Raycaster.MixProject do
       version: "0.1.0",
       elixir: "~> 1.16",
       deps: deps(),
+      # The frames the engine tests compare against, not a test file itself.
+      test_ignore_filters: ["test/tour_frames.exs"],
       atomvm: [
         # Raycaster.Bench measures where the time goes instead of playing.
         start: Raycaster
