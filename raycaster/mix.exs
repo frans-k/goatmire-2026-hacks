@@ -27,6 +27,11 @@ defmodule Raycaster.MixProject do
       # list whenever a callback returns one. From git, because the published
       # Hex package ships no build config.
       {:avm_scene, github: "atomvm/avm_scene"},
+      # MQTT 3.1.1 client in plain Erlang, for finding the other players.
+      {:amqtt_client,
+       github: "atomvm/amqtt",
+       ref: "35fc07b37d1f76f25397c1d4355c91dd17149318",
+       sparse: "amqtt_client"},
       {:exatomvm, github: "AtomVM/exatomvm", runtime: false},
       # Runs esptool in-process for the mix atomvm.esp32.* tasks.
       {:pythonx, "~> 0.4.0", runtime: false},

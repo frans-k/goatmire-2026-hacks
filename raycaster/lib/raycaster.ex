@@ -12,11 +12,27 @@ defmodule Raycaster do
 
   With no key held and the view already on screen, it draws nothing and waits
   for a key, redrawing once a second only to update that line.
+
+  With wifi credentials in `config/config_local.exs` it also joins an MQTT broker,
+  tells the other badges where it is and draws them as coloured figures, see
+  `Raycaster.Wire`. Without them it is a room to walk around in alone, and the
+  game starts at once either way: wifi is joined in a process of its own.
   """
 
-  alias Raycaster.{Engine, Keyboard, Screen}
+  alias Raycaster.{Engine, Keyboard, Link, Peers, Screen, Wifi, Wire}
+
+  # Read while compiling on the laptop: the badge never sees Application at all.
+  @ssid Application.compile_env!(:raycaster, [:wifi, :ssid])
+  @psk Application.compile_env!(:raycaster, [:wifi, :psk])
+  @broker Application.compile_env!(:raycaster, [:mqtt, :host])
+  @broker_port Application.compile_env!(:raycaster, [:mqtt, :port])
 
   @report_ms 1000
+
+  # How often to say where we are: while walking, and while standing so the
+  # others do not forget us. A badge is forgotten after four seconds.
+  @moving_ms 200
+  @heartbeat_ms 1_000
 
   def start do
     {:ok, scene, display} = Screen.start()
@@ -30,29 +46,106 @@ defmodule Raycaster do
 
     presenter = spawn_link(fn -> present(scene, display) end)
 
+    chip = chip_id()
+    id = hex(chip)
+    IO.puts("raycaster: badge #{id}")
+
+    net = %{
+      link: nil,
+      up: false,
+      peers: Peers.new(),
+      id: id,
+      colour: Wire.colour(chip),
+      sent: nil
+    }
+
+    if @ssid != nil, do: go_online(self(), id)
+
     now = now()
-    stats = %{at: now, frames: 0, ray: 0, wait: 0, draw: 0, hud: "", drawn: nil, showing: false}
-    loop(presenter, grid, Engine.new(), [], now, stats)
+
+    stats = %{
+      at: now,
+      frames: 0,
+      ray: 0,
+      wait: 0,
+      draw: 0,
+      hud: "",
+      drawn: nil,
+      peers: nil,
+      showing: false
+    }
+
+    loop(presenter, grid, Engine.new(), [], now, stats, net)
   end
 
-  defp loop(presenter, grid, player, held, last, stats) do
-    {held, last} =
-      case drain(held) do
-        [] when player == stats.drawn -> idle(stats.at + @report_ms - now())
-        held -> {held, last}
+  # Joins wifi and then the broker, apart from the game, which cannot wait the
+  # up to 30 seconds and five tries that joining can take. The link is started
+  # here, so it lives as long as this process, which is parked once it is done.
+  defp go_online(game, id) do
+    spawn_link(fn ->
+      IO.puts("Connecting to #{@ssid}...")
+
+      case Wifi.connect(@ssid, @psk) do
+        {:ok, address} ->
+          IO.puts("Wifi up, #{address}")
+
+          {:ok, link} =
+            Link.start_link(owner: game, host: @broker, port: @broker_port, id: id)
+
+          send(game, {:link_pid, link})
+          park()
+
+        {:error, reason} ->
+          IO.puts("Wifi failed: #{inspect(reason)}, playing alone")
+      end
+    end)
+  end
+
+  defp park do
+    receive do
+      _message -> park()
+    end
+  end
+
+  defp chip_id do
+    case :esp.get_default_mac() do
+      {:ok, mac} -> mac
+      _other -> <<0, 0, 0, 0, 0, 0>>
+    end
+  end
+
+  defp hex(<<>>), do: <<>>
+
+  defp hex(<<byte, rest::binary>>),
+    do: <<digit(div(byte, 16)), digit(rem(byte, 16)), hex(rest)::binary>>
+
+  defp digit(n) when n < 10, do: ?0 + n
+  defp digit(n), do: ?A + n - 10
+
+  defp loop(presenter, grid, player, held, last, stats, net) do
+    {held, net} = drain(held, net)
+
+    {held, last, net} =
+      if held == [] and player == stats.drawn and net.peers == stats.peers do
+        idle(stats.at + @report_ms - now(), net)
+      else
+        {held, last, net}
       end
 
     t0 = now()
     player = Engine.step(grid, player, held, t0 - last)
+    net = announce(%{net | peers: Peers.expire(net.peers, t0)}, player, held, t0)
 
-    items = Engine.frame(grid, player, Screen.width(), Screen.height())
+    others = Peers.others(net.peers)
+    items = Engine.sprites(grid, player, others, Screen.width(), Screen.height())
+    items = items ++ Engine.frame(grid, player, Screen.width(), Screen.height())
     t1 = now()
 
     # One frame at a time goes to the display: wait for the last one if it is
     # still going out.
     draw = shown(stats.showing)
     t2 = now()
-    send(presenter, {:frame, self(), [hud(stats.hud) | items]})
+    send(presenter, {:frame, self(), [hud(stats.hud), status(net) | items]})
 
     stats = %{
       stats
@@ -61,11 +154,33 @@ defmodule Raycaster do
         wait: stats.wait + t2 - t1,
         draw: stats.draw + draw,
         drawn: player,
+        peers: net.peers,
         showing: true
     }
 
-    loop(presenter, grid, player, held, t0, report(stats, t2, length(items)))
+    loop(presenter, grid, player, held, t0, report(stats, t2, length(items)), net)
   end
+
+  # Says where we are, when it is time: often while walking, now and then while
+  # standing so that nobody forgets us.
+  defp announce(%{up: true, link: link} = net, player, held, now) when link != nil do
+    gap = if held == [], do: @heartbeat_ms, else: @moving_ms
+
+    if net.sent == nil or now - net.sent >= gap do
+      Link.publish(link, Wire.encode(player, net.colour))
+      %{net | sent: now}
+    else
+      net
+    end
+  end
+
+  defp announce(net, _player, _held, _now), do: net
+
+  defp status(%{up: true, peers: peers}), do: line("online, #{Peers.count(peers) + 1} playing")
+  defp status(%{link: nil}), do: line(if @ssid == nil, do: "offline", else: "joining wifi")
+  defp status(_net), do: line("connecting")
+
+  defp line(text), do: {:text, 4, 24, :default16px, 0x00FF00, 0x000000, text}
 
   # How long the last frame took from being handed over to being on the panel.
   defp shown(false), do: 0
@@ -89,26 +204,43 @@ defmodule Raycaster do
     end
   end
 
-  # Nothing to draw until a key goes down, or until the line in the corner is
-  # due. The clock restarts here, so the time spent waiting is not taken for
-  # one long frame and the first step after it does not jump.
-  defp idle(timeout) do
+  # Nothing to draw until a key goes down, someone else moves, or until the line
+  # in the corner is due. The clock restarts here, so the time spent waiting is
+  # not taken for one long frame and the first step after it does not jump.
+  defp idle(timeout, net) do
     receive do
-      {:key, :down, label} -> {[label], now()}
+      {:key, :down, label} -> {[label], now(), net}
+      {:key, :up, _label} -> idle(timeout, net)
+      {:link_pid, _link} = message -> {[], now(), heard(message, net)}
+      {:link, _status} = message -> {[], now(), heard(message, net)}
+      {:peer, _id, _pose} = message -> {[], now(), heard(message, net)}
+      {:gone, _id} = message -> {[], now(), heard(message, net)}
     after
-      max(timeout, 0) -> {[], now()}
+      max(timeout, 0) -> {[], now(), net}
     end
   end
 
-  # Keys held right now: a press adds, a release removes.
-  defp drain(held) do
+  # Keys held right now: a press adds, a release removes. Whatever the network
+  # has said meanwhile is taken in too. Only its own messages are matched: the
+  # display's `:shown` is in this mailbox as well, and is not this function's.
+  defp drain(held, net) do
     receive do
-      {:key, :down, label} -> drain([label | :lists.delete(label, held)])
-      {:key, :up, label} -> drain(:lists.delete(label, held))
+      {:key, :down, label} -> drain([label | :lists.delete(label, held)], net)
+      {:key, :up, label} -> drain(:lists.delete(label, held), net)
+      {:link_pid, _link} = message -> drain(held, heard(message, net))
+      {:link, _status} = message -> drain(held, heard(message, net))
+      {:peer, _id, _pose} = message -> drain(held, heard(message, net))
+      {:gone, _id} = message -> drain(held, heard(message, net))
     after
-      0 -> held
+      0 -> {held, net}
     end
   end
+
+  defp heard({:link_pid, link}, net), do: %{net | link: link}
+  defp heard({:link, :up}, net), do: %{net | up: true, sent: nil}
+  defp heard({:link, :down}, net), do: %{net | up: false, peers: Peers.new()}
+  defp heard({:peer, id, pose}, net), do: %{net | peers: Peers.put(net.peers, id, pose, now())}
+  defp heard({:gone, id}, net), do: %{net | peers: Peers.drop(net.peers, id)}
 
   defp report(%{frames: frames} = stats, now, rects) when now - stats.at >= @report_ms do
     # Rounded, so that standing still (one frame in a little over a second)

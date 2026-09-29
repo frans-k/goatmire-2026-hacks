@@ -1,4 +1,5 @@
 %{
+  "amqtt_client": {:git, "https://github.com/atomvm/amqtt.git", "35fc07b37d1f76f25397c1d4355c91dd17149318", [ref: "35fc07b37d1f76f25397c1d4355c91dd17149318", sparse: "amqtt_client"]},
   "atomvm": {:hex, :atomvm, "0.7.0-alpha.1", "06b23911a6f9bc2f6376d69a867a8257fa2e22e0be690ffcae960aac63701259", [:rebar3], [], "hexpm", "d9d2f6c24784f6b257ff6587d03473c592f621e66e152ba4f49ae4c255d4c789"},
   "avm_scene": {:git, "https://github.com/atomvm/avm_scene.git", "aba9249f189d29d4564d81ba50bbe9fe28bc1d44", []},
   "cc_precompiler": {:hex, :cc_precompiler, "0.1.11", "8c844d0b9fb98a3edea067f94f616b3f6b29b959b6b3bf25fee94ffe34364768", [:mix], [{:elixir_make, "~> 0.7", [hex: :elixir_make, repo: "hexpm", optional: false]}], "hexpm", "3427232caf0835f94680e5bcf082408a70b48ad68a5f5c0b02a3bea9f3a075b9"},
