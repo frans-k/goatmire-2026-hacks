@@ -6,7 +6,7 @@ defmodule Raycaster do
   frames per second and where the time went (casting rays, or waiting for the
   display), and shows the same on screen.
 
-  The display takes a frame in a process of its own, `present/1`, so the next
+  The display takes a frame in a process of its own, `present/2`, so the next
   frame is cast while the last one is still going out. The game only waits
   when it has a new frame ready before the display has finished the last.
 
@@ -18,15 +18,8 @@ defmodule Raycaster do
 
   @report_ms 1000
 
-  # The shortest time between frames. AtomGL answers a frame as soon as it is
-  # queued, not when it has been drawn, and keeps up to 32. A game that casts
-  # faster than the panel draws fills that queue and the screen shows what
-  # happened a second ago. Holding the game back to a rate the panel can keep
-  # up with keeps the queue empty, so a key you let go of stops at once.
-  @min_frame_ms 50
-
   def start do
-    {:ok, scene} = Screen.start()
+    {:ok, scene, display} = Screen.start()
     {:ok, _keyboard} = Keyboard.start_link()
 
     IO.puts("raycaster: #{Engine.cols()} columns, #{Screen.width()}x#{Screen.height()}")
@@ -35,10 +28,10 @@ defmodule Raycaster do
     # it is used, so looking the map up per frame (or per ray step) is ruinous.
     grid = Engine.grid()
 
-    presenter = spawn_link(fn -> present(scene) end)
+    presenter = spawn_link(fn -> present(scene, display) end)
 
     now = now()
-    stats = %{at: now, frames: 0, ray: 0, wait: 0, hud: "", drawn: nil, showing: false}
+    stats = %{at: now, frames: 0, ray: 0, wait: 0, draw: 0, hud: "", drawn: nil, showing: false}
     loop(presenter, grid, Engine.new(), [], now, stats)
   end
 
@@ -57,16 +50,16 @@ defmodule Raycaster do
 
     # One frame at a time goes to the display: wait for the last one if it is
     # still going out.
-    shown(stats.showing)
+    draw = shown(stats.showing)
     t2 = now()
     send(presenter, {:frame, self(), [hud(stats.hud) | items]})
-    pace(@min_frame_ms - (now() - t0))
 
     stats = %{
       stats
       | frames: stats.frames + 1,
         ray: stats.ray + t1 - t0,
         wait: stats.wait + t2 - t1,
+        draw: stats.draw + draw,
         drawn: player,
         showing: true
     }
@@ -74,26 +67,25 @@ defmodule Raycaster do
     loop(presenter, grid, player, held, t0, report(stats, t2, length(items)))
   end
 
-  defp pace(ms) when ms > 0 do
-    receive do
-    after
-      ms -> :ok
-    end
-  end
+  # How long the last frame took from being handed over to being on the panel.
+  defp shown(false), do: 0
+  defp shown(true), do: receive(do: ({:shown, ms} -> ms))
 
-  defp pace(_ms), do: :ok
-
-  defp shown(false), do: :ok
-  defp shown(true), do: receive(do: (:shown -> :ok))
-
-  # avm_scene answers the call only once the display has taken the frame, so
-  # :shown means the next one can be sent.
-  defp present(scene) do
+  # AtomGL answers a frame when it is queued, not when it is drawn, and keeps
+  # up to 32, so a call to avm_scene says nothing about the panel. Its calls to
+  # the font registry are answered in queue order by the task that draws, so
+  # asking it to drop a font that was never there comes back only after every
+  # frame before it is on the panel. That is what :shown means: the game can
+  # never be more than one frame ahead of what is shown, and the time it took
+  # is the panel's real time for a frame.
+  defp present(scene, display) do
     receive do
       {:frame, from, items} ->
+        t0 = now()
         :ok = GenServer.call(scene, {:frame, items}, 5_000)
-        send(from, :shown)
-        present(scene)
+        :port.call(display, {:deregister_font, :sync}, 5_000)
+        send(from, {:shown, now() - t0})
+        present(scene, display)
     end
   end
 
@@ -125,10 +117,13 @@ defmodule Raycaster do
     fps = div(frames * 1000 + div(elapsed, 2), elapsed)
     ray = div(stats.ray * 10, max(frames, 1))
     wait = div(stats.wait * 10, max(frames, 1))
-    line = "#{fps} fps  ray #{tenths(ray)} ms  wait #{tenths(wait)} ms  #{rects} rects"
+    draw = div(stats.draw * 10, max(frames, 1))
+
+    line =
+      "#{fps} fps  ray #{tenths(ray)} ms  wait #{tenths(wait)} ms  draw #{tenths(draw)} ms  #{rects} rects"
 
     IO.puts(line)
-    %{stats | at: now, frames: 0, ray: 0, wait: 0, hud: line}
+    %{stats | at: now, frames: 0, ray: 0, wait: 0, draw: 0, hud: line}
   end
 
   defp report(stats, _now, _rects), do: stats

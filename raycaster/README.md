@@ -168,17 +168,29 @@ walking still halved the frame rate, so something in the scan holds up both.
 ### Frames queued behind the panel
 
 Walking looked like 22 fps but the view kept moving for about a second after
-releasing a key. AtomGL pre-acknowledges a frame when it is put on its queue
-(32 deep, oldest dropped), so `GenServer.call` returns long before the panel has
-drawn it, and a game that casts faster than the panel draws just fills the queue
-and shows the past. The panel was also on the driver's default 40 MHz, where
-moving a frame takes about 31 ms by itself; the badge firmware runs it at 80 MHz.
+releasing a key. AtomGL acknowledges a frame when it is put on its queue (32
+deep, oldest dropped), not when it is drawn, so `GenServer.call` returns long
+before the panel has drawn anything, and a game that casts faster than the panel
+draws fills the queue and shows the past. The fps line counted frames made, not
+frames shown, and the "push 10 ms" was only the enqueue.
 
-Now `Screen` asks for 80 MHz and the game keeps at least `@min_frame_ms` (50)
-between frames. Casting got cheaper too, 31 ms while walking against 38, and
-walking reads up to 18 fps. The trail is much shorter but not gone: the real
-time the panel takes per frame was never measured, only inferred from the source
-and the feel, so 50 ms is a guess. Raise it for less trail, lower it for more fps.
+The panel's real time for a frame turned out to be about 40 ms standing still and
+about 65 ms while walking (18 to 74), when casting on both cores competes with
+the task that draws. `Screen` now asks for 80 MHz, as the firmware does, which
+helped, but the draw time is still longer than the 50 ms floor that was first
+tried, so a floor could not fix it.
+
+What does: AtomGL answers its font calls in queue order on the task that draws,
+so asking it to drop a font that was never registered comes back only once every
+earlier frame is on the panel. `present/2` makes that call after each frame, and
+the game never casts more than one frame ahead of what is shown. The trail is
+gone. The line in the corner now has `draw`, the time from handing a frame over to
+seeing it on the panel; the `wait` next to it is how long the game had to stand
+still for it.
+
+Walking now reads 11 fps on average and 15 at best, casting in about 33 ms with
+the panel taking 65: the panel, not the engine, is the limit. The earlier 18 to 22
+fps were frames the game made and the panel never showed.
 
 ## Why not real Doom?
 

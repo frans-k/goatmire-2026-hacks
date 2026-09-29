@@ -25,7 +25,12 @@ defmodule Raycaster.Screen do
     spi = open_spi()
     display = :erlang.open_port({:spawn, "display"}, display_opts(spi))
 
-    Raycaster.Scene.start_link([width: @width, height: @height], display_server: {:port, display})
+    {:ok, scene} =
+      Raycaster.Scene.start_link([width: @width, height: @height],
+        display_server: {:port, display}
+      )
+
+    {:ok, scene, display}
   end
 
   # AtomGL adds its own SPI device, so device_config stays empty here.
