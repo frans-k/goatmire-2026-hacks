@@ -24,25 +24,12 @@ defmodule Raycaster.Engine do
   @far 1 <<< 26
 
   # 16 x 16. Digits are wall types, `.` is floor. The outer ring must be wall:
-  # rays are not bounds checked and stop only when they enter a wall cell.
-  @rows [
-    "3333333333333333",
-    "3..............3",
-    "3..1111....22..3",
-    "3..1..........23",
-    "3..1..........23",
-    "3..1......11...3",
-    "3.......2..1...3",
-    "3.......2..1...3",
-    "3..22...2......3",
-    "3..............3",
-    "3....1111......3",
-    "3....1..1..22..3",
-    "3....1..1..2...3",
-    "3...........2..3",
-    "3..............3",
-    "3333333333333333"
-  ]
+  # rays are not bounds checked and stop only when they enter a wall cell. The
+  # relay's goat walks the same map, so it is read from the relay's copy while
+  # compiling on the laptop, and the badge only ever sees the tuple below.
+  @map Path.expand("../../relay/priv/map.txt", __DIR__)
+  @external_resource @map
+  @rows @map |> File.read!() |> String.split("\n", trim: true)
 
   @size length(@rows)
 

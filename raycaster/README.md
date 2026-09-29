@@ -341,68 +341,43 @@ Next:
 
 **Gameplay**
 
-- There is only a room to walk around in: no goal, enemies or shooting, and the
-  walls are flat colours, not textures. The evil goat below is the plan for a
-  goal.
-- One map, hard-coded in `lib/engine.ex`. Loading maps, or letting Claude
-  generate them, would need the map to come from outside the module.
+- Alone, there is only a room to walk around in: no goal, enemies or shooting. With
+  the relay there is the evil goat below. The walls are flat colours, not textures.
+- One map, `../relay/priv/map.txt`, built into `lib/engine.ex` while compiling.
+  Loading maps at run time, or letting Claude generate them, would need the badge
+  to get the map from outside the module, and the relay's goat to walk it too.
 - The fps line in the corner is a permanent debug readout. Make it a toggle.
 - Make it a mode of the chat badge (`../chat`), switched by a key, instead of a
   separate firmware.
 
-**Evil goat (planned, the goat is drawn)**
+**Evil goat**
 
-A goat that hunts the players in a room, and a game over screen for whoever it
-catches. There is one goat per room and it lives on the relay: the server moves
-it, decides what it sees and who it catches, and the badges only draw it. Badges
-hear from the server once a second, and each message costs them about ten
-milliseconds, so that stays as it is. The goat is simulated on the server about
-ten times a second, but it is only sent in the snapshot, so it jumps. Without the
-relay, offline, there is no goat.
+Done on the laptop, not tried on a badge yet: a goat on the relay that hunts the
+players in a room, and a game over screen for whoever it catches. How it moves is in
+`../relay/README.md`. On the badge:
 
-1. **One map for both.** The server needs the map for sight and paths. Move the
-   rows out of `@rows` in `lib/engine.ex` into a shared file, say
-   `../maps/level1.txt`, and read it in both projects while compiling
-   (`@external_resource`). `Engine.grid/0` still hands out a plain tuple, and the
-   tour frames prove the map did not change.
-2. **`Relay.Goat`, pure and tested.** A position, a mode (`:wander`, `:hunt`,
-   `:search`), a target and where the target was last seen. It wanders slowly to
-   random open cells by a breadth first search over the grid. It hunts when a
-   player is in its line of sight within some range (the same quarter cell walk as
-   `Engine.visible?`), chasing by breadth first search at about 600 against the
-   player's 800. When it loses sight it searches: it goes to where it last saw
-   the player and waits a few seconds, then wanders again. Nearer than about half
-   a cell to a player's last reported position is a catch. Tests: it never
-   enters a wall, it sees through open floor but not walls, it reaches a player
-   round a corner, and it catches.
-3. **The goat in the rooms.** A goat per room, spawned as far from the first
-   player as it can be. `Relay.Hub` gets a faster tick for the goat (about 100
-   ms), and the snapshot stays at `tick_ms`. The snapshot becomes
-   `{"p": [...], "g": [x, y, mode]}`, and a new `caught` event goes to the caught
-   badge only. That player cannot be hunted until they come back, and then not
-   for a few seconds.
-4. **The badge.**
-   - `RelayWire` reads `g` and `caught`, refusing anything odd as it does now.
-   - Done: `Engine.sprites` takes `{:goat, x, y, hunting}` beside the players,
-     and draws a goat facing you: body, head, ears, curling horns, beard, legs,
-     and eyes that are yellow, and red while it hunts. It is thirteen rectangles
-     near and five far off, where the rest would be a pixel each, and uses the
-     same depth sort, wall hiding and shading as the players. Build with
-     `RAYCASTER_GOAT=1` and a goat stands hunting at the end of the corridor
-     ahead of where you start, for looking at on the badge.
-   - The loop gets a mode, playing or over. On `caught` it draws one still frame
-     (dark red, "GAME OVER", "The evil goat got you", time survived, "press any
-     key") and waits. A key joins the room again. The HUD shows time survived.
-   - The badge should probably say where it is every 500 ms rather than every
-     second, so catches are judged on fresher positions. Sending should cost the
-     badge less than receiving, but that needs measuring.
-5. **Measure and write up.** What the goat figure costs in fps (autopilot, as
-   above), whether catches feel fair on one second snapshots, the catch radius
-   and speeds tuned, and sections in this README and `../relay/README.md`.
+- The map is `../relay/priv/map.txt`, read while compiling, so the relay's goat walks
+  the same walls. The tour frames prove it is the map it was.
+- `Engine.sprites` takes `{:goat, x, y, hunting}` beside the players and draws a goat
+  facing you: body, head, ears, curling horns, beard, legs, and eyes that are yellow,
+  and red while it hunts or searches. It is thirteen rectangles near and five far
+  off, and hides behind walls like anyone.
+- `RelayWire` reads the goat from the snapshot and `caught`, and refuses a snapshot
+  with an odd goat in it, as it does one with an odd player.
+- On `caught` the game draws `Raycaster.GameOver` once: the goat up close on dark
+  red, "GAME OVER", how long you lasted, and "Press any key". Keys are ignored for
+  the first 1.5 seconds, so one held while running does not skip it. A key sends
+  `respawn` and starts again at the start. The line under the fps one says how long
+  you have been alive.
+- The badge says where it is twice a second instead of once, so the goat judges a
+  catch on a fresher position. What that costs the badge is not measured.
+- Build with `RAYCASTER_GOAT=1` and a goat stands hunting at the end of the corridor
+  ahead of where you start, to look at without a relay.
 
-Only the caught player is out: the others keep playing, and there are no rounds.
-Later: a goat that speeds up the longer you last, more goats in bigger rooms, a
-goat of your own offline, and moving the goat smoothly between snapshots.
+Left to do: try it on a badge; measure what the goat costs in fps (autopilot, as
+above) and what sending twice a second costs; tune speeds and the catch radius by
+playing. Later: a goat that speeds up the longer you last, more goats in bigger
+rooms, a goat of your own offline, and moving the goat smoothly between snapshots.
 
 **Not verified**
 

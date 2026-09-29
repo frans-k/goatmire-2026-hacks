@@ -9,9 +9,12 @@ defmodule Raycaster.RelayLink do
 
     * `{:link, :up}` once the server has put this badge in a room, and `{:link, :down}`
       when the connection is lost
-    * `{:players, [{slot, x, y}]}` once a tick, everyone else in the room
+    * `{:players, [{slot, x, y}], goat}` once a tick, everyone else in the room and
+      the goat, `{x, y, hunting}` or nil
+    * `:caught` when the goat has caught this badge
 
-  `publish/3` says where this badge stands, and is dropped while not in a room.
+  `publish/3` says where this badge stands, and `respawn/1` that it is back after
+  being caught; both are dropped while not in a room.
   """
 
   use GenServer
@@ -27,6 +30,9 @@ defmodule Raycaster.RelayLink do
 
   @doc "Tells the server where this badge stands, in the map's fixed point."
   def publish(link, x, y), do: GenServer.cast(link, {:publish, x, y})
+
+  @doc "Back in the game after being caught."
+  def respawn(link), do: GenServer.cast(link, :respawn)
 
   @impl true
   def init(opts) do
@@ -61,6 +67,13 @@ defmodule Raycaster.RelayLink do
   def handle_cast({:publish, x, y}, %{slot: slot, port: port} = state) when slot != nil do
     state = %{state | ref: state.ref + 1}
     send_text(port, RelayWire.pos(join_ref(state), Integer.to_string(state.ref), x, y))
+
+    {:noreply, state}
+  end
+
+  def handle_cast(:respawn, %{slot: slot, port: port} = state) when slot != nil do
+    state = %{state | ref: state.ref + 1}
+    send_text(port, RelayWire.respawn(join_ref(state), Integer.to_string(state.ref)))
 
     {:noreply, state}
   end
@@ -129,8 +142,13 @@ defmodule Raycaster.RelayLink do
     %{state | slot: slot}
   end
 
-  defp heard({:players, players}, state) do
-    send(state.owner, {:players, players})
+  defp heard({:players, players, goat}, state) do
+    send(state.owner, {:players, players, goat})
+    state
+  end
+
+  defp heard(:caught, state) do
+    send(state.owner, :caught)
     state
   end
 

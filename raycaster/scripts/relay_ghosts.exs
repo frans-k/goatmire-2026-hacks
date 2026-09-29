@@ -7,6 +7,8 @@
 # If the relay asks for a token: RELAY_TOKEN=... elixir scripts/relay_ghosts.exs ...
 #
 # Defaults to 3 ghosts for 120 seconds. They wander the map, one position a second.
+# The goat hunts them too: a ghost it catches says so, and comes back at the start
+# two seconds later, as a badge does when a key is pressed.
 
 Mix.install([{:websockex, "~> 0.4"}])
 
@@ -45,6 +47,7 @@ defmodule Ghost do
       room: nil,
       seen: 0,
       others: 0,
+      out: false,
       angle: :rand.uniform(65_535)
     }
 
@@ -73,6 +76,11 @@ defmodule Ghost do
   @impl true
   def handle_info(:join, state), do: {:reply, {:text, Raycaster.RelayWire.join("1")}, state}
 
+  def handle_info(:step, %{out: true} = state) do
+    Process.send_after(self(), :step, 1_000)
+    {:ok, state}
+  end
+
   def handle_info(:step, state) do
     Process.send_after(self(), :step, 1_000)
     radians = state.angle * 2 * :math.pi() / 65_536
@@ -92,6 +100,10 @@ defmodule Ghost do
     {:reply, {:text, Raycaster.RelayWire.pos("1", "2", state.x, state.y)}, state}
   end
 
+  def handle_info(:respawn, state) do
+    {:reply, {:text, Raycaster.RelayWire.respawn("1", "3")}, %{state | out: false, x: 384, y: 384}}
+  end
+
   @impl true
   def handle_frame({:text, text}, state) do
     case Raycaster.RelayWire.decode(text, state.slot) do
@@ -100,9 +112,14 @@ defmodule Ghost do
         Process.send_after(self(), :step, 300)
         {:ok, %{state | slot: slot, room: room}}
 
-      {:players, players} ->
-        send(state.report, {:players, state.n, length(players)})
+      {:players, players, goat} ->
+        send(state.report, {:players, state.n, length(players), goat})
         {:ok, %{state | seen: state.seen + 1, others: length(players)}}
+
+      :caught ->
+        send(state.report, {:caught, state.n})
+        Process.send_after(self(), :respawn, 2_000)
+        {:ok, %{state | out: true}}
 
       :ignore ->
         {:ok, state}
@@ -146,8 +163,13 @@ report = fn report, joined, latest ->
         IO.puts("ghost #{n}: room #{room}, slot #{slot} of #{max}")
         report.(report, Map.put(joined, n, {room, slot}), latest)
 
-      {:players, n, others} ->
+      {:players, n, others, goat} ->
+        if n == 1, do: IO.puts("goat: #{inspect(goat)}")
         report.(report, joined, Map.put(latest, n, others))
+
+      {:caught, n} ->
+        IO.puts("ghost #{n}: caught by the goat")
+        report.(report, joined, latest)
     after
       min(left, 1_000) -> report.(report, joined, latest)
     end
