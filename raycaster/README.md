@@ -18,7 +18,10 @@ mix atomvm.esp32.monitor --timeout 20
 ```
 
 The engine is plain integer maths, so its geometry is tested on the laptop with
-`mix test`: known wall distances, staying on screen, collisions, turning.
+`mix test`: known wall distances, staying on screen, collisions, turning. It
+also draws a fixed tour of eight views and compares them with
+`test/tour_frames.exs`, the frames the engine drew before it was sped up, so a
+change meant only to be faster has to draw exactly the same picture.
 
 The monitor prints, once a second:
 
@@ -28,6 +31,8 @@ The monitor prints, once a second:
 
 `ray` is time spent casting rays and building the display list, `push` is time
 the display took to accept the frame. The same line is drawn in the top corner.
+Standing still with no key held, nothing is redrawn except that line, once a
+second, so it reads 1 fps.
 
 ## How it works
 
@@ -82,7 +87,9 @@ million BEAM instructions a second. A ray of 15 steps costs about 1.6 ms, which
 is why 80 columns cannot reach 15 frames per second.
 
 `lib/bench.ex` reproduces the micro-benchmarks. Set `start: Raycaster.Bench` in
-`mix.exs`, flash, and read the monitor.
+`mix.exs`, flash, and read the monitor. Before them it times the same fixed tour
+the tests use, five frames per view, which is the number to compare when
+changing the engine.
 
 ## Why not real Doom?
 
@@ -120,13 +127,31 @@ group.
 
 **Speed**
 
-- The sine table is still a literal, read a few times per frame. Passing it as an
-  argument like the map would save that. Estimated at about 1 ms per frame (four
-  reads at roughly 280 us each from the benchmark), not measured in the game.
-- Fewer arguments per ray step. A call with nine arguments costs about 14 us on
-  its own, and a step is one such call. Packing the per-ray constants into one
-  tuple would cut that. Also from the benchmark, not tried.
-- Lower the view distance (`@max_steps`) so rays in open rooms stop early.
+Done, but not yet measured on the badge (the tour in `lib/bench.ex` is the
+measurement to make):
+
+- The ray step loop is 6 BEAM instructions instead of about 37. The bounds
+  check and the step limit are gone, because the map's outer wall stops every
+  ray (a test checks the border stays closed), and the cell is one index into
+  the grid tuple instead of an x and a y.
+- No module literals are read while drawing. The sine table and the wall
+  colours are functions returning plain integers, which the compiler makes
+  into jump tables.
+- The "no wall crossing" distance was `1 <<< 28`, past the 28 bit integers
+  AtomVM keeps unboxed on this chip. It is `1 <<< 26` now.
+
+Next:
+
+- The per column work is now the bigger share. Setting up a column (the
+  12 argument `columns`, `cast`, two `axis_setup` and `colour`) is about 150
+  instructions, mostly saving and restoring registers around the calls, against
+  6 per ray step. Fewer calls and fewer live variables per column is the next
+  thing to try.
+- `step/4` still reads six small key lists as literals per frame.
+- Overlap the display push with casting the next frame, and find out whether
+  AtomVM runs two schedulers on this dual core chip
+  (`:erlang.system_info(:schedulers_online)`). If it does, cast the two halves
+  of the screen in two processes.
 - Draw at 40 columns while moving and 80 while standing still. `@cols` is a
   module attribute today, so it would have to become an argument.
 

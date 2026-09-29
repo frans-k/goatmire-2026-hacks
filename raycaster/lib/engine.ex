@@ -17,10 +17,13 @@ defmodule Raycaster.Engine do
   # ran at 7 fps on the badge standing still, 40 at 12-13 (about 10 while
   # walking). It must divide the screen width.
   @cols 40
-  @far 1 <<< 28
-  @max_steps 32
+  # Distance along a ray that never crosses a grid line. AtomVM's integers are
+  # 28 bits wide on this chip before they spill onto the heap, so keep it
+  # below 2^27.
+  @far 1 <<< 26
 
-  # 16 x 16. Digits are wall types, `.` is floor.
+  # 16 x 16. Digits are wall types, `.` is floor. The outer ring must be wall:
+  # rays are not bounds checked and stop only when they enter a wall cell.
   @rows [
     "3333333333333333",
     "3..............3",
@@ -57,12 +60,6 @@ defmodule Raycaster.Engine do
         end)
         |> List.to_tuple()
 
-  # 256 steps to a turn, scaled by 256. Also a literal, but only read a few
-  # times per frame.
-  @sin for(a <- 0..255, do: round(:math.sin(a * 2 * :math.pi() / 256) * 256)) |> List.to_tuple()
-
-  # Index by wall type.
-  @palette {{0, 0, 0}, {200, 60, 50}, {60, 170, 70}, {70, 100, 210}}
   @ceiling 0x202838
   @floor 0x504030
 
@@ -113,14 +110,14 @@ defmodule Raycaster.Engine do
     plane_y = div(dir_x * 169, 256)
     column_width = div(width, @cols)
 
-    walls = columns(grid, 0, x, y, dir_x, dir_y, plane_x, plane_y, column_width, height, nil, [])
+    # The first item is on top, so floor and ceiling go last, behind the walls.
+    # The walls are put in front of them as they are found.
+    behind = [
+      {:rect, 0, div(height, 2), width, height - div(height, 2), @floor},
+      {:rect, 0, 0, width, div(height, 2), @ceiling}
+    ]
 
-    # The first item is on top, so floor and ceiling go behind the walls.
-    walls ++
-      [
-        {:rect, 0, div(height, 2), width, height - div(height, 2), @floor},
-        {:rect, 0, 0, width, div(height, 2), @ceiling}
-      ]
+    columns(grid, 0, x, y, dir_x, dir_y, plane_x, plane_y, column_width, height, nil, behind)
   end
 
   # `run` is the rectangle being widened: neighbouring columns with the same
@@ -158,7 +155,12 @@ defmodule Raycaster.Engine do
     {delta_x, step_x, side_x} = axis_setup(x, map_x, ray_x)
     {delta_y, step_y, side_y} = axis_setup(y, map_y, ray_y)
 
-    march(grid, map_x, map_y, side_x, side_y, delta_x, delta_y, step_x, step_y, @max_steps)
+    # The cell is tracked as its place in the grid tuple, so a step across a
+    # vertical grid line is +-1 and across a horizontal one +-@size. Counted
+    # from 1, as :erlang.element/2 does: elem/2 counts from 0 and adds the 1 on
+    # every read.
+    cell = map_y * @size + map_x + 1
+    march(grid, cell, side_x, side_y, delta_x, delta_y, step_x, step_y * @size)
   end
 
   defp axis_setup(_pos, _cell, 0), do: {@far, 1, @far}
@@ -175,54 +177,25 @@ defmodule Raycaster.Engine do
     end
   end
 
-  defp march(grid, map_x, map_y, side_x, side_y, delta_x, delta_y, step_x, step_y, left) do
+  # The inner loop, run for every grid line every ray crosses: nearly all of
+  # the frame time. Kept to a comparison, two additions and a tuple read per
+  # step: 6 BEAM instructions, where it was about 37 with the bounds checked
+  # cell/3 call and a step counter. There is no bounds check and no step limit, because the map's outer
+  # wall stops every ray.
+  defp march(grid, cell, side_x, side_y, delta_x, delta_y, step_x, step_y) do
     if side_x < side_y do
-      map_x = map_x + step_x
+      cell = cell + step_x
 
-      case cell(grid, map_x, map_y) do
-        0 when left > 0 ->
-          march(
-            grid,
-            map_x,
-            map_y,
-            side_x + delta_x,
-            side_y,
-            delta_x,
-            delta_y,
-            step_x,
-            step_y,
-            left - 1
-          )
-
-        0 ->
-          {1, 0, side_x}
-
-        wall ->
-          {wall, 0, side_x}
+      case :erlang.element(cell, grid) do
+        0 -> march(grid, cell, side_x + delta_x, side_y, delta_x, delta_y, step_x, step_y)
+        wall -> {wall, 0, side_x}
       end
     else
-      map_y = map_y + step_y
+      cell = cell + step_y
 
-      case cell(grid, map_x, map_y) do
-        0 when left > 0 ->
-          march(
-            grid,
-            map_x,
-            map_y,
-            side_x,
-            side_y + delta_y,
-            delta_x,
-            delta_y,
-            step_x,
-            step_y,
-            left - 1
-          )
-
-        0 ->
-          {1, 1, side_y}
-
-        wall ->
-          {wall, 1, side_y}
+      case :erlang.element(cell, grid) do
+        0 -> march(grid, cell, side_x, side_y + delta_y, delta_x, delta_y, step_x, step_y)
+        wall -> {wall, 1, side_y}
       end
     end
   end
@@ -235,7 +208,10 @@ defmodule Raycaster.Engine do
   # Darker with distance, and walls facing along y a little darker again, so
   # corners read.
   defp colour(wall, side, dist) do
-    {r, g, b} = elem(@palette, wall)
+    rgb = rgb(wall)
+    r = rgb >>> 16
+    g = rgb >>> 8 &&& 255
+    b = rgb &&& 255
     shade = max(48, 256 - div(dist, 12))
     shade = if side == 1, do: div(shade * 3, 4), else: shade
 
@@ -251,7 +227,22 @@ defmodule Raycaster.Engine do
   defp sign(n) when n < 0, do: -1
   defp sign(_n), do: 0
 
+  # Wall colours by type. A function of plain integers rather than a tuple of
+  # tuples, because AtomVM copies a module literal onto the heap on every use,
+  # and this is read once per column.
+  defp rgb(1), do: 0xC83C32
+  defp rgb(2), do: 0x3CAA46
+  defp rgb(3), do: 0x4664D2
+
   defp index(angle), do: angle >>> 8 &&& 255
-  defp sin(index), do: elem(@sin, index)
-  defp cos(index), do: elem(@sin, index + 64 &&& 255)
+  defp sin(index), do: sin_table(index)
+  defp cos(index), do: sin_table(index + 64 &&& 255)
+
+  # 256 steps to a turn, scaled by 256. One clause per step, built while
+  # compiling, for the same reason as rgb/1: the compiler turns them into a
+  # jump table of plain integers, where a tuple would be a literal.
+  for step <- 0..255 do
+    defp sin_table(unquote(step)),
+      do: unquote(round(:math.sin(step * 2 * :math.pi() / 256) * 256))
+  end
 end

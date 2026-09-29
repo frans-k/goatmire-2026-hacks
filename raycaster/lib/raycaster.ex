@@ -5,6 +5,9 @@ defmodule Raycaster do
   Arrows or W A S D move and turn, Q and E strafe. Once a second it prints
   frames per second and where the time went (casting rays, or waiting for the
   display), and shows the same on screen.
+
+  With no key held and the view already on screen, it draws nothing and waits
+  for a key, redrawing once a second only to update that line.
   """
 
   alias Raycaster.{Engine, Keyboard, Screen}
@@ -22,11 +25,16 @@ defmodule Raycaster do
     grid = Engine.grid()
 
     now = now()
-    loop(scene, grid, Engine.new(), [], now, %{at: now, frames: 0, ray: 0, push: 0, hud: ""})
+    stats = %{at: now, frames: 0, ray: 0, push: 0, hud: "", drawn: nil}
+    loop(scene, grid, Engine.new(), [], now, stats)
   end
 
   defp loop(scene, grid, player, held, last, stats) do
-    held = drain(held)
+    {held, last} =
+      case drain(held) do
+        [] when player == stats.drawn -> idle(stats.at + @report_ms - now())
+        held -> {held, last}
+      end
 
     t0 = now()
     player = Engine.step(grid, player, held, t0 - last)
@@ -41,10 +49,22 @@ defmodule Raycaster do
       stats
       | frames: stats.frames + 1,
         ray: stats.ray + t1 - t0,
-        push: stats.push + t2 - t1
+        push: stats.push + t2 - t1,
+        drawn: player
     }
 
     loop(scene, grid, player, held, t0, report(stats, t2, length(items)))
+  end
+
+  # Nothing to draw until a key goes down, or until the line in the corner is
+  # due. The clock restarts here, so the time spent waiting is not taken for
+  # one long frame and the first step after it does not jump.
+  defp idle(timeout) do
+    receive do
+      {:key, :down, label} -> {[label], now()}
+    after
+      max(timeout, 0) -> {[], now()}
+    end
   end
 
   # Keys held right now: a press adds, a release removes.
@@ -64,7 +84,7 @@ defmodule Raycaster do
     line = "#{fps} fps  ray #{tenths(ray)} ms  push #{tenths(push)} ms  #{rects} rects"
 
     IO.puts(line)
-    %{at: now, frames: 0, ray: 0, push: 0, hud: line}
+    %{stats | at: now, frames: 0, ray: 0, push: 0, hud: line}
   end
 
   defp report(stats, _now, _rects), do: stats
