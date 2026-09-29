@@ -7,7 +7,7 @@
 #   fly scale count 1
 #
 # Fly ends TLS for us, so badges connect to wss://<app>.fly.dev.
-app = "goatmire-relay"
+app = "evilgoat-relay"
 primary_region = "arn"
 
 [build]

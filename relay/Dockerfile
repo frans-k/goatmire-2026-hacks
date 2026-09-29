@@ -1,7 +1,7 @@
 # The relay for the raycaster badges. Build and run:
 #
-#   docker build -t goatmire-relay .
-#   docker run -d --name goatmire-relay -p 4040:4040 -e RELAY_TOKEN=... goatmire-relay
+#   docker build -t evilgoat-relay .
+#   docker run -d --name evilgoat-relay -p 4040:4040 -e RELAY_TOKEN=... evilgoat-relay
 #
 # RELAY_TOKEN (optional) is a shared token badges must send; RELAY_MAX is the most
 # connections at once (200); PORT is the port inside the container (4040).
