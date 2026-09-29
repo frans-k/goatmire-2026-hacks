@@ -67,6 +67,14 @@ defmodule Raycaster.Engine do
   # Q8 per second, and angle units per second.
   @move_speed 800
   @turn_speed 40_000
+  # A bit for each direction a key can ask for, see keys/2.
+  @forward 1
+  @back 2
+  @right 4
+  @left 8
+  @turn_right 16
+  @turn_left 32
+
   # How close to a wall the player may get, in Q8.
   @radius 60
 
@@ -82,9 +90,10 @@ defmodule Raycaster.Engine do
 
   # Held keys are labels from Raycaster.Keymap.
   def step(grid, state, held, dt_ms) do
-    forward = axis(held, ["Up", "W"], ["Down", "S"])
-    strafe = axis(held, ["E"], ["Q"])
-    turn = axis(held, ["Right", "D"], ["Left", "A"])
+    keys = keys(held, 0)
+    forward = axis(keys, @forward, @back)
+    strafe = axis(keys, @right, @left)
+    turn = axis(keys, @turn_right, @turn_left)
 
     angle = state.a + div(turn * @turn_speed * dt_ms, 1000)
     index = index(angle)
@@ -272,10 +281,30 @@ defmodule Raycaster.Engine do
     div(r * shade, 256) <<< 16 ||| div(g * shade, 256) <<< 8 ||| div(b * shade, 256)
   end
 
-  defp axis(held, plus, minus) do
-    if(Enum.any?(plus, &(&1 in held)), do: 1, else: 0) -
-      if(Enum.any?(minus, &(&1 in held)), do: 1, else: 0)
-  end
+  # The held keys as one integer, a bit per direction, read in a single pass.
+  # Matching the labels in function heads keeps them out of the module's
+  # literals, which AtomVM would copy on every use: the lists of labels this
+  # replaced cost 3 ms a frame on the badge.
+  defp keys([], bits), do: bits
+  defp keys([label | rest], bits), do: keys(rest, bits ||| key(label))
+
+  defp key("Up"), do: @forward
+  defp key("W"), do: @forward
+  defp key("Down"), do: @back
+  defp key("S"), do: @back
+  defp key("E"), do: @right
+  defp key("Q"), do: @left
+  defp key("Right"), do: @turn_right
+  defp key("D"), do: @turn_right
+  defp key("Left"), do: @turn_left
+  defp key("A"), do: @turn_left
+  defp key(_label), do: 0
+
+  # 1, 0 or -1: both directions of an axis held cancel out.
+  defp axis(keys, plus, minus), do: held(keys, plus) - held(keys, minus)
+
+  defp held(keys, bit) when (keys &&& bit) == 0, do: 0
+  defp held(_keys, _bit), do: 1
 
   defp sign(n) when n > 0, do: 1
   defp sign(n) when n < 0, do: -1
