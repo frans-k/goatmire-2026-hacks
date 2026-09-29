@@ -161,8 +161,8 @@ defmodule Raycaster.EngineTest do
 
     test "labels as charlists mean the same as binaries" do
       grid = Engine.grid()
-      # Row 9 is open floor from end to end, so every direction can move.
-      start = %{x: 7 * @cell + 128, y: 9 * @cell + 128, a: 0}
+      # Columns 9 to 14 are open in rows 8 to 10, so every direction can move.
+      start = %{x: 11 * @cell + 128, y: 9 * @cell + 128, a: 0}
 
       for label <- ["Up", "S", "Q", "E", "D", "Left"] do
         binary = Engine.step(grid, start, [label], 200)
