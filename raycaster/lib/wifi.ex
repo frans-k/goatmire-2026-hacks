@@ -10,10 +10,19 @@ defmodule Raycaster.Wifi do
   # can miss the access point, so a failed attempt is retried a few times.
   def connect(ssid, psk, attempts \\ 5) do
     # The network driver wants charlists; binaries are not reliably accepted.
+    # The clock is set over SNTP, and the caller is sent `{:synchronized, time}`:
+    # a certificate is not yet valid at the epoch, so a `wss://` connection has to
+    # wait for it.
+    caller = self()
+
     config = [
       ssid: :erlang.binary_to_list(ssid),
       psk: :erlang.binary_to_list(psk),
-      dhcp_hostname: ~c"avm-raycaster"
+      dhcp_hostname: ~c"avm-raycaster",
+      sntp: [
+        host: "pool.ntp.org",
+        synchronized: fn time -> send(caller, {:synchronized, time}) end
+      ]
     ]
 
     case :network.wait_for_sta(config, 30_000) do

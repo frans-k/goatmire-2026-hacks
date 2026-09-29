@@ -104,6 +104,7 @@ defmodule Raycaster do
       case Wifi.connect(@ssid, @psk) do
         {:ok, address} ->
           IO.puts("Wifi up, #{address}")
+          if secure?(), do: await_clock()
           start_link(game, id)
           watch(game, id)
 
@@ -111,6 +112,30 @@ defmodule Raycaster do
           IO.puts("Wifi failed: #{inspect(reason)}, playing alone")
       end
     end)
+  end
+
+  # `wss://` is checked against certificates, which are not yet valid at the epoch,
+  # so it waits for the clock, by looking at it: the callback the wifi is given for
+  # this was not reliably heard. Not for long: it goes on without, and the driver
+  # will succeed when it retries once the clock has come.
+  defp secure?,
+    do: is_binary(@relay) and binary_part(@relay, 0, min(6, byte_size(@relay))) == "wss://"
+
+  # Well after the epoch, and before any clock a badge could have been set to.
+  @clock_set 1_700_000_000
+
+  defp await_clock(tries \\ 40) do
+    cond do
+      :erlang.system_time(:second) > @clock_set ->
+        IO.puts("Clock set")
+
+      tries == 0 ->
+        IO.puts("Clock not set in 20 s, going on")
+
+      true ->
+        :timer.sleep(500)
+        await_clock(tries - 1)
+    end
   end
 
   defp start_link(game, id) do
