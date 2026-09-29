@@ -21,6 +21,7 @@ RUN mix local.hex --force && mix local.rebar --force \
 
 COPY config config
 COPY lib lib
+COPY priv priv
 RUN mix compile
 
 EXPOSE 4040

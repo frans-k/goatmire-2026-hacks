@@ -9,7 +9,12 @@ defmodule Relay.Hub do
   keep it that way: the rooms do the sorting, this only sends.
 
   A player is a process, the websocket handler, and is out of its room when that
-  process ends. It is sent `{:snap, frame}`, a Phoenix frame ready to push.
+  process ends. It is sent `{:snap, frame}`, a Phoenix frame ready to push, and
+  `{:caught, frame}` when the room's goat catches it.
+
+  The goats move on a timer of their own, `goat_ms` (100), much more often than
+  the snapshot goes out: the badges see the goat jump once a tick, but it walks,
+  sees and catches in small steps in between.
   """
 
   use GenServer
@@ -34,16 +39,29 @@ defmodule Relay.Hub do
 
   def leave(pid), do: GenServer.cast(__MODULE__, {:leave, pid})
 
+  @doc "Back in the game after being caught."
+  def respawn(pid), do: GenServer.cast(__MODULE__, {:respawn, pid, now()})
+
   @doc "The rooms and how many are in each."
   def counts, do: GenServer.call(__MODULE__, :counts)
 
   @impl true
   def init(opts) do
     tick_ms = Keyword.get(opts, :tick_ms, Application.get_env(:relay, :tick_ms, 1_000))
+    goat_ms = Keyword.get(opts, :goat_ms, Application.get_env(:relay, :goat_ms, 100))
     max = Keyword.get(opts, :max, 8)
     Process.send_after(self(), :tick, tick_ms)
+    Process.send_after(self(), :goat, goat_ms)
 
-    {:ok, %{rooms: Rooms.new(max), tick_ms: tick_ms, max: max, monitors: %{}}}
+    {:ok,
+     %{
+       rooms: Rooms.new(max),
+       tick_ms: tick_ms,
+       goat_ms: goat_ms,
+       goat_at: now(),
+       max: max,
+       monitors: %{}
+     }}
   end
 
   @impl true
@@ -69,19 +87,42 @@ defmodule Relay.Hub do
 
   def handle_cast({:leave, pid}, state), do: {:noreply, drop(state, pid)}
 
+  def handle_cast({:respawn, pid, now}, state),
+    do: {:noreply, %{state | rooms: Rooms.respawn(state.rooms, pid, now)}}
+
   @impl true
   def handle_info(:tick, state) do
     now = now()
 
     for room <- Rooms.rooms(state.rooms) do
       players = Rooms.snapshot(state.rooms, room, now)
-      frame = JSON.encode!([nil, nil, @topic, "snap", %{"p" => players}])
+
+      frame =
+        JSON.encode!([
+          nil,
+          nil,
+          @topic,
+          "snap",
+          %{"p" => players, "g" => Rooms.goat(state.rooms, room)}
+        ])
 
       for {pid, _slot} <- Rooms.members(state.rooms, room), do: send(pid, {:snap, frame})
     end
 
     Process.send_after(self(), :tick, state.tick_ms)
     {:noreply, state}
+  end
+
+  # Measured, not assumed: a late timer moves the goat as far as the time it took.
+  def handle_info(:goat, state) do
+    now = now()
+    {rooms, caught} = Rooms.step_goats(state.rooms, now - state.goat_at, now)
+    frame = JSON.encode!([nil, nil, @topic, "caught", %{}])
+
+    for pid <- caught, do: send(pid, {:caught, frame})
+
+    Process.send_after(self(), :goat, state.goat_ms)
+    {:noreply, %{state | rooms: rooms, goat_at: now}}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state), do: {:noreply, drop(state, pid)}

@@ -12,7 +12,7 @@ Here it is one message a second, from a server that does the sorting.
 ```sh
 mix deps.get
 mix run --no-halt            # port 4040, open to anyone who can reach it
-mix test                     # 36 tests, 11 with real websocket clients
+mix test                     # 60 tests, 13 with real websocket clients
 ```
 
 Open `http://localhost:4040/` to see who is in which room.
@@ -87,11 +87,50 @@ a frame is `[join_ref, ref, topic, event, payload]`, as JSON, over
 |---|---|
 | `phx_join` on `raycaster:lobby` | `phx_reply` with `{"room": 3, "slot": 2, "max": 8}`, or an error `full` |
 | `pos`, `{"x": 300, "y": 512}` | none |
+| `respawn`, `{}` | none; a caught badge is back |
 | `heartbeat` on `phoenix` | `phx_reply` ok |
 | `phx_leave` | `phx_reply` ok |
 
-Once a tick (a second) the server pushes `snap`, `{"p": [[slot, x, y], ...]}`: everyone
-in the room who has said where they are in the last five seconds, the badge itself
-included. A slot is who a player is and what colour they are drawn in.
+Once a tick (a second) the server pushes `snap`,
+`{"p": [[slot, x, y], ...], "g": [x, y, hunting]}`: everyone in the room who has said
+where they are in the last five seconds and is not out, the badge itself included,
+and the room's goat. A slot is who a player is and what colour they are drawn in.
+`hunting` is 1 while the goat is after someone and 0 while it wanders. To a badge the
+goat catches it pushes `caught`, `{}`.
 
 `x` and `y` are in the map's fixed point, 256 to a cell, so 0 to 4095.
+
+## The evil goat
+
+Every room has a goat, `lib/relay/goat.ex`, moved here and drawn by the badges. It is
+made with the room, in the open cell farthest from where the badges start, and goes
+with it.
+
+- It **wanders** at 350 (a badge walks at 800, in the same fixed point per second)
+  to one random open cell after another, the shortest way through the cells.
+- It **hunts** the nearest player it can see within eight cells, straight at them at
+  600, rounding a corner if the straight line would clip one. It sees along the same
+  quarter cell walk a badge uses to hide figures, so it sees you when you could see
+  it.
+- When it loses sight of them it **searches**: it goes to where it last saw them and
+  stays there for four seconds, then wanders again. It does not follow anyone it
+  cannot see.
+- Nearer than half a cell to a player is a **catch**. The player is out: left out of
+  the snapshot, told `caught`, and not listened to until they send `respawn`. Then
+  they are at the start again, and safe from the goat for three seconds.
+
+The goats move every `goat_ms` (100), and the time between steps is measured, so a
+late timer moves them as far as the time it took. They are only sent in the
+snapshot, so a badge sees the goat jump a second at a time. Catches are judged on the
+last position a badge sent, which the badges send twice a second, so being caught
+can come up to half a second after you think you got away.
+
+The map is `priv/map.txt`, and `../raycaster` builds its engine from the same file,
+so the goat and the badges cannot disagree about where the walls are. `Relay.Level`
+has what the goat needs from it: open cells, sight, and the way from cell to cell.
+
+To watch it on the laptop, run the server and
+`elixir ../raycaster/scripts/relay_ghosts.exs ws://localhost:4040 4 60`: the ghosts
+print where the goat is and whom it catches, and come back two seconds after being
+caught. In 45 seconds with four ghosts it caught five times, searched, and wandered
+off again between them.

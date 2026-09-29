@@ -152,4 +152,73 @@ defmodule Relay.RoomsTest do
     assert Rooms.members(state, 2) == [c: 1]
     assert Rooms.members(state, 9) == []
   end
+
+  describe "the goat" do
+    # A player standing on the goat, heard at `now`.
+    defp on_the_goat(state, member, now) do
+      [x, y, _hunting] = Rooms.goat(state, 1)
+      Rooms.move(state, member, x, y, now)
+    end
+
+    test "every room has one, far from the start, wandering" do
+      {state, _place} = Rooms.join(Rooms.new(), :a)
+
+      assert [x, y, 0] = Rooms.goat(state, 1)
+      assert x + y >= 20 * 256
+      assert Rooms.goat(state, 2) == nil
+    end
+
+    test "goes when its room does" do
+      {state, _place} = Rooms.join(Rooms.new(), :a)
+      state = Rooms.leave(state, :a)
+
+      assert Rooms.goat(state, 1) == nil
+    end
+
+    test "catches whoever it reaches, who is then out of the snapshot and not listened to" do
+      {state, _places} = join_all(Rooms.new(), [:a, :b])
+      state = state |> on_the_goat(:a, 0) |> Rooms.move(:b, 384, 384, 0)
+
+      {state, caught} = Rooms.step_goats(state, 100, 100)
+
+      assert caught == [:a]
+      assert Rooms.out?(state, :a)
+      refute Rooms.out?(state, :b)
+      assert [[2, 384, 384]] = Rooms.snapshot(state, 1, 100)
+
+      state = Rooms.move(state, :a, 384, 384, 1_000)
+      assert [[2, 384, 384]] = Rooms.snapshot(state, 1, 1_000)
+    end
+
+    test "does not catch the quiet, or anyone who has not said where they are" do
+      {state, _places} = join_all(Rooms.new(), [:a, :b])
+      state = on_the_goat(state, :a, 0)
+
+      assert {_state, []} = Rooms.step_goats(state, 100, 10_000)
+    end
+
+    test "after a respawn a player is back, and safe for a while" do
+      {state, _place} = Rooms.join(Rooms.new(), :a)
+      {state, [:a]} = state |> on_the_goat(:a, 0) |> Rooms.step_goats(100, 100)
+
+      state = Rooms.respawn(state, :a, 1_000)
+      refute Rooms.out?(state, :a)
+      assert Rooms.snapshot(state, 1, 1_000) == []
+
+      state = on_the_goat(state, :a, 1_500)
+      assert {state, []} = Rooms.step_goats(state, 100, 2_000)
+      assert [[1, _x, _y]] = Rooms.snapshot(state, 1, 2_000)
+
+      state = on_the_goat(state, :a, 3_900)
+      assert {_state, [:a]} = Rooms.step_goats(state, 100, 4_000)
+    end
+
+    test "a respawn from someone who is not out changes nothing" do
+      {state, _place} = Rooms.join(Rooms.new(), :a)
+      state = Rooms.move(state, :a, 384, 384, 0)
+
+      assert Rooms.respawn(state, :a, 100) == state
+      assert Rooms.respawn(state, :nobody, 100) == state
+    end
+  end
 end

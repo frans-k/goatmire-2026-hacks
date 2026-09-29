@@ -9,8 +9,12 @@ defmodule Relay.Socket do
     * `phx_join` on `raycaster:lobby` is answered with the room, the slot and the
       most a room holds: `{"room": 3, "slot": 2, "max": 8}`
     * `pos`, `{"x": 300, "y": 512}`, is where the badge stands; no answer
+    * `respawn`, `{}`, brings a caught badge back; no answer
     * `heartbeat` on `phoenix` and `phx_leave` are answered as Phoenix does
-    * the hub pushes `snap`, `{"p": [[slot, x, y], ...]}`, once a tick
+    * the hub pushes `snap`, `{"p": [[slot, x, y], ...], "g": [x, y, hunting]}`,
+      once a tick: everyone in the room who is not out, and the goat, hunting 1
+      while it is after someone and 0 while it wanders
+    * and `caught`, `{}`, to a badge the goat has caught
 
   Anything else is ignored: this is open to anyone, and only ever answers what it
   understands.
@@ -64,6 +68,18 @@ defmodule Relay.Socket do
     {:ok, state}
   end
 
+  defp handle_frame(
+         _join_ref,
+         _ref,
+         "raycaster:lobby",
+         "respawn",
+         _payload,
+         %{joined: true} = state
+       ) do
+    Hub.respawn(self())
+    {:ok, state}
+  end
+
   defp handle_frame(nil, ref, "phoenix", "heartbeat", _payload, state) do
     {:push, {:text, ok_reply(nil, ref, "phoenix", %{})}, state}
   end
@@ -77,6 +93,7 @@ defmodule Relay.Socket do
 
   @impl true
   def handle_info({:snap, frame}, %{joined: true} = state), do: {:push, {:text, frame}, state}
+  def handle_info({:caught, frame}, %{joined: true} = state), do: {:push, {:text, frame}, state}
   def handle_info(_message, state), do: {:ok, state}
 
   @impl true

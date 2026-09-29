@@ -1,3 +1,3 @@
 import Config
 
-config :relay, port: 4041, tick_ms: 50
+config :relay, port: 4041, tick_ms: 50, goat_ms: 20
