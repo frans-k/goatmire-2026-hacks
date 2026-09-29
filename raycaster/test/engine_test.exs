@@ -106,6 +106,94 @@ defmodule Raycaster.EngineTest do
     end
   end
 
+  describe "sprites/5" do
+    @red 0xC83C32
+
+    defp sprites(player, others),
+      do: Engine.sprites(Engine.grid(), player, others, @width, @height)
+
+    # A player in open floor, facing east along row 9.
+    defp facing_east, do: %{x: 2 * @cell + 128, y: 9 * @cell + 128, a: 0}
+
+    defp ahead(cells, across \\ 0) do
+      {2 * @cell + 128 + cells * @cell, 9 * @cell + 128 + across, @red}
+    end
+
+    # The body, the wide rectangle of the two.
+    defp body(items), do: Enum.max_by(items, fn {:rect, _x, _y, w, _h, _c} -> w end)
+    defp centre({:rect, x, _y, w, _h, _c}), do: x + div(w, 2)
+
+    test "nobody means nothing to draw" do
+      assert sprites(facing_east(), []) == []
+    end
+
+    test "someone straight ahead is in the middle of the screen" do
+      items = sprites(facing_east(), [ahead(4)])
+
+      assert length(items) == 2
+      assert abs(centre(body(items)) - div(@width, 2)) <= 1
+    end
+
+    test "someone off to one side is on that side" do
+      right = sprites(facing_east(), [ahead(4, 100)])
+      left = sprites(facing_east(), [ahead(4, -100)])
+
+      assert centre(body(right)) > div(@width, 2)
+      assert centre(body(left)) < div(@width, 2)
+    end
+
+    test "a farther figure is smaller, and stands on the same floor line" do
+      {:rect, _x, _y, near_w, near_h, _c} = body(sprites(facing_east(), [ahead(2)]))
+      {:rect, _x, _y, far_w, far_h, _c} = body(sprites(facing_east(), [ahead(8)]))
+
+      assert near_w > far_w
+      assert near_h > far_h
+    end
+
+    test "everything stays on the screen" do
+      for cells <- [1, 3, 6, 10], across <- [-600, -200, 0, 200, 600] do
+        for {:rect, x, y, w, h, _c} <- sprites(facing_east(), [ahead(cells, across)]) do
+          assert x >= 0 and y >= 0 and w > 0 and h > 0
+          assert x + w <= @width and y + h <= @height
+        end
+      end
+    end
+
+    test "someone behind the player is not drawn" do
+      assert sprites(facing_east(), [{@cell + 128, 9 * @cell + 128, @red}]) == []
+    end
+
+    test "someone too close is not drawn" do
+      assert sprites(facing_east(), [ahead(0) |> put_elem(0, 2 * @cell + 128 + 30)]) == []
+    end
+
+    test "someone behind a wall is not drawn, and is once the wall is out of the way" do
+      # Row 2 has a wall at columns 3 to 6.
+      player = %{x: 2 * @cell + 128, y: 2 * @cell + 128, a: 0}
+
+      assert sprites(player, [{8 * @cell + 128, 2 * @cell + 128, @red}]) == []
+      assert length(sprites(player, [{3 * @cell - 20, 2 * @cell + 128, @red}])) == 2
+    end
+
+    test "the nearest come first, since the first item is on top" do
+      items = sprites(facing_east(), [ahead(8, 100), ahead(2), ahead(5, -100)])
+      widths = for {:rect, _x, _y, w, _h, _c} <- items, w > 20, do: w
+
+      assert length(items) == 6
+      assert widths == Enum.sort(widths, :desc)
+    end
+
+    test "a distant figure is darker than a near one" do
+      brightness = fn items ->
+        {:rect, _x, _y, _w, _h, c} = body(items)
+        Bitwise.band(c, 0xFF) + Bitwise.band(Bitwise.bsr(c, 8), 0xFF) + Bitwise.bsr(c, 16)
+      end
+
+      assert brightness.(sprites(facing_east(), [ahead(2)])) >
+               brightness.(sprites(facing_east(), [ahead(9)]))
+    end
+  end
+
   describe "the map" do
     # Rays are not bounds checked and have no step limit: the outer wall is what
     # stops them.
