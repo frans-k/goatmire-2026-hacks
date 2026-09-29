@@ -135,6 +135,12 @@ about 1.5 times, not 2. So `frame/4` now spawns a process for the right half of
 the screen each frame; that half is cast from the right edge inward, and the
 two rectangles meeting at the seam are joined when they match, so the frames
 are still exactly the same. With the cost of the spawn it gives 1.36 times.
+
+In the game after all of this, standing still casts in 17 to 19 ms. Walking
+casts in 27 to 35 ms most of the time (up to 57), because the keyboard scan
+still takes its share, and the push stays at about 10 ms. Seconds of steady
+walking read 16 to 22 fps, where they read 11 to 13 before; seconds with
+stops in them read lower, since standing still redraws only once a second.
 With two schedulers the keyboard scan could have run on the other core, yet
 walking still halved the frame rate, so something in the scan holds up both.
 
