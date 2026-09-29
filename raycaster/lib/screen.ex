@@ -55,6 +55,9 @@ defmodule Raycaster.Screen do
       backlight: @display_backlight,
       backlight_active: :low,
       backlight_enabled: true,
+      # The driver defaults to 40 MHz, which takes about 31 ms just to move a
+      # frame. The badge firmware runs the panel at 80 MHz.
+      clock_speed_hz: 80_000_000,
       spi_host: spi
     ]
   end
