@@ -51,9 +51,8 @@ defmodule Raycaster.Bench do
     micro()
   end
 
-  # Would casting in two processes help? Only if AtomVM runs a scheduler on
-  # each of the chip's two cores. Draws the tour twice over, once in one
-  # process and once split across two running side by side.
+  # Raycaster.Engine.frame/4 casts half the screen in a second process, which
+  # only helps if AtomVM runs a scheduler on each of the chip's two cores.
   defp cores do
     schedulers =
       try do
@@ -63,22 +62,6 @@ defmodule Raycaster.Bench do
       end
 
     IO.puts("schedulers online: #{inspect(schedulers)}")
-
-    grid = Engine.grid()
-    views = tour()
-
-    one = timed(fn -> draw_all(grid, views ++ views) end)
-    two = timed(fn -> side_by_side(fn -> draw_all(grid, views) end) end)
-
-    IO.puts("tour twice, one process: #{one} ms, two processes: #{two} ms")
-  end
-
-  defp draw_all(grid, views), do: Enum.each(views, fn player -> draw(grid, player, 1) end)
-
-  defp side_by_side(fun) do
-    parent = self()
-    for _ <- 1..2, do: spawn(fn -> send(parent, {:done, fun.()}) end)
-    for _ <- 1..2, do: receive(do: ({:done, _} -> :ok))
   end
 
   defp frames do

@@ -127,10 +127,14 @@ the rest, so that was trimmed next, again drawing exactly the same frames.
 | Ray loop shortened | 27.0 ms |
 | `cast` and `colour` inlined into the column loop | 23.7 ms |
 | Per frame constants in one tuple, start cell worked out once, no tuple per axis | 21.0 ms |
+| Right half of the screen cast in a second process | 15.4 ms |
 
-The bench also asks how many schedulers AtomVM runs: 2, one per core. Drawing
-the tour twice took 336 ms in one process and 224 ms split across two, so a
-second process casting half the columns would give about 1.5 times, not 2.
+AtomVM runs two schedulers here, one per core (the bench prints the count).
+Drawing the tour twice took 336 ms in one process and 224 ms split across two,
+about 1.5 times, not 2. So `frame/4` now spawns a process for the right half of
+the screen each frame; that half is cast from the right edge inward, and the
+two rectangles meeting at the seam are joined when they match, so the frames
+are still exactly the same. With the cost of the spawn it gives 1.36 times.
 With two schedulers the keyboard scan could have run on the other core, yet
 walking still halved the frame rate, so something in the scan holds up both.
 
@@ -194,9 +198,10 @@ Next:
   literals.
 - The fps line reads "0 fps" standing still: one frame in just over a second
   rounds down.
-- Cast the two halves of the screen in two processes: AtomVM runs two
-  schedulers here, and the bench shows about 1.5 times for two processes.
-  Runs that meet in the middle have to be joined to keep the same picture.
+- The second process is spawned afresh every frame, which copies the map into
+  it each time. A worker that lives for the whole game and keeps its own copy
+  of the map could get closer to the 1.5 times two processes allow, perhaps
+  1 ms a frame.
 - Overlap the display push with casting the next frame.
 - Draw at 40 columns while moving and 80 while standing still. `@cols` is a
   module attribute today, so it would have to become an argument.

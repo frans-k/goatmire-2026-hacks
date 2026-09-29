@@ -17,6 +17,7 @@ defmodule Raycaster.Engine do
   # ran at 7 fps on the badge standing still, 40 at 12-13 (about 10 while
   # walking). It must divide the screen width.
   @cols 40
+  @half div(@cols, 2)
   # Distance along a ray that never crosses a grid line. AtomVM's integers are
   # 28 bits wide on this chip before they spill onto the heap, so keep it
   # below 2^27.
@@ -133,14 +134,34 @@ defmodule Raycaster.Engine do
       {:rect, 0, 0, width, div(height, 2), @ceiling}
     ]
 
-    columns(view, 0, nil, behind)
+    # AtomVM runs a scheduler on each of the chip's two cores, so the right
+    # half of the screen is cast in a second process while this one casts the
+    # left. It goes from the right edge towards the middle, so both halves end
+    # with their open rectangle at the seam, where join/3 puts the two back
+    # together if they turn out to be one.
+    parent = self()
+    ref = make_ref()
+
+    spawn_link(fn ->
+      send(parent, {ref, columns(view, @cols - 1, @half - 1, -1, nil, [])})
+    end)
+
+    {left_run, left} = columns(view, 0, @half, 1, nil, behind)
+
+    receive do
+      # The right half's rectangles come nearest the seam first; the display
+      # list wants the rightmost first.
+      {^ref, {right_run, right}} -> :lists.reverse(right, join(left_run, right_run, left))
+    end
   end
 
   # `run` is the rectangle being widened: neighbouring columns with the same
-  # height and colour (a flat wall facing you) become one rectangle.
-  defp columns(_view, @cols, run, acc), do: emit(run, acc)
+  # height and colour (a flat wall facing you) become one rectangle. Casts
+  # columns from `i` up to or down to `stop` (by `step`, +1 or -1), and returns
+  # the rectangle still being widened along with the finished ones before it.
+  defp columns(_view, stop, stop, _step, run, acc), do: {run, acc}
 
-  defp columns(view, i, run, acc) do
+  defp columns(view, i, stop, step, run, acc) do
     {grid, cell, in_x, in_y, dir_x, dir_y, plane_x, plane_y, column_width, height} = view
 
     camera = div(2 * i * 256, @cols) - 256
@@ -154,12 +175,24 @@ defmodule Raycaster.Engine do
 
     {run, acc} =
       case run do
-        {rx, rw, ^top, ^line, ^colour} -> {{rx, rw + column_width, top, line, colour}, acc}
-        _ -> {{i * column_width, column_width, top, line, colour}, emit(run, acc)}
+        {rx, rw, ^top, ^line, ^colour} ->
+          # Going leftwards, the rectangle grows at its left edge.
+          x = if step > 0, do: rx, else: i * column_width
+          {{x, rw + column_width, top, line, colour}, acc}
+
+        _ ->
+          {{i * column_width, column_width, top, line, colour}, emit(run, acc)}
       end
 
-    columns(view, i + 1, run, acc)
+    columns(view, i + step, stop, step, run, acc)
   end
+
+  # The two rectangles meeting at the seam, one from each half: one rectangle
+  # if they match, as a single pass across the screen would have made it.
+  defp join({x, w, top, line, colour}, {_x, right_w, top, line, colour}, acc),
+    do: [{:rect, x, top, w + right_w, line, colour} | acc]
+
+  defp join(left_run, right_run, acc), do: emit(right_run, emit(left_run, acc))
 
   defp emit(nil, acc), do: acc
   defp emit({x, w, y, h, colour}, acc), do: [{:rect, x, y, w, h, colour} | acc]
