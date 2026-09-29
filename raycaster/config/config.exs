@@ -18,3 +18,12 @@ config :raycaster, :mqtt,
 if File.exists?(Path.join(__DIR__, "config_local.exs")) do
   import_config("config_local.exs")
 end
+
+# For measuring: RAYCASTER_AUTOPILOT=1 turns on the spot by itself, so every run
+# casts the same views, and RAYCASTER_OFFLINE=1 leaves the network out whatever
+# config_local.exs says. Read while compiling, like the rest.
+config :raycaster, :autopilot, System.get_env("RAYCASTER_AUTOPILOT") == "1"
+
+if System.get_env("RAYCASTER_OFFLINE") == "1" do
+  config :raycaster, :wifi, ssid: nil, psk: nil
+end

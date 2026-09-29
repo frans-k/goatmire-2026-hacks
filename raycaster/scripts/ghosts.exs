@@ -66,8 +66,8 @@ IO.puts(
   "#{count} ghost(s) on #{host} for #{seconds}s, ids #{Enum.map_join(ghosts, ", ", & &1.id)}"
 )
 
-# 0.6 cell a second at five updates a second.
-step = 30
+# A cell a second, at two updates a second: what a badge sends.
+step = 128
 
 tick = fn ghosts ->
   Enum.map(ghosts, fn g ->
@@ -106,8 +106,8 @@ loop = fn loop, ghosts, left ->
     finish.(ghosts)
   else
     Enum.each(ghosts, publish)
-    Process.sleep(200)
-    loop.(loop, tick.(ghosts), left - 200)
+    Process.sleep(500)
+    loop.(loop, tick.(ghosts), left - 500)
   end
 end
 

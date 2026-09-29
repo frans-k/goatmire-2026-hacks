@@ -27,12 +27,18 @@ defmodule Raycaster do
   @broker Application.compile_env!(:raycaster, [:mqtt, :host])
   @broker_port Application.compile_env!(:raycaster, [:mqtt, :port])
 
+  # Turns on the spot by itself, for measuring, see config/config.exs.
+  @autopilot Application.compile_env!(:raycaster, :autopilot)
+
   @report_ms 1000
 
   # How often to say where we are: while walking, and while standing so the
-  # others do not forget us. A badge is forgotten after four seconds.
-  @moving_ms 200
-  @heartbeat_ms 1_000
+  # others do not forget us. A badge is forgotten after four seconds. Each
+  # message costs every other badge about ten milliseconds of a chip that does a
+  # million instructions a second, so this is slow, and `Raycaster.Peers` fills
+  # the gaps by carrying the others along.
+  @moving_ms 500
+  @heartbeat_ms 1_500
 
   def start do
     {:ok, scene, display} = Screen.start()
@@ -139,9 +145,11 @@ defmodule Raycaster do
 
   defp loop(presenter, grid, player, held, last, stats, net) do
     {held, net} = drain(held, net)
+    held = if @autopilot, do: ["Right"], else: held
 
     {held, last, net} =
-      if held == [] and player == stats.drawn and net.peers == stats.peers do
+      if held == [] and player == stats.drawn and net.peers == stats.peers and
+           not Peers.moving?(net.peers, now()) do
         idle(stats.at + @report_ms - now(), net)
       else
         {held, last, net}
@@ -151,7 +159,7 @@ defmodule Raycaster do
     player = Engine.step(grid, player, held, t0 - last)
     net = announce(%{net | peers: Peers.expire(net.peers, t0)}, player, held, t0)
 
-    others = Peers.others(net.peers)
+    others = Peers.others(net.peers, t0)
     items = Engine.sprites(grid, player, others, Screen.width(), Screen.height())
     items = items ++ Engine.frame(grid, player, Screen.width(), Screen.height())
     t1 = now()

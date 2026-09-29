@@ -211,8 +211,8 @@ before and you walk around alone. Joining wifi happens beside the game, so it
 never waits for it.
 
 A badge publishes 9 bytes, `<<x::16, y::16, a::16, r, g, b>>`, to
-`goatmire/raycaster/v1/<chip id>` about five times a second while it moves and once
-a second while it stands, and listens on `goatmire/raycaster/v1/+`. An empty message
+`goatmire/raycaster/v1/<chip id>` twice a second while it moves and once every
+1.5 seconds while it stands, and listens on `goatmire/raycaster/v1/+`. An empty message
 on its own topic means it has left, which is what the broker sends for a badge that
 dies (its last will). A badge not heard from for four seconds is forgotten. It is
 all in `lib/wire.ex` and `lib/peers.ex`, both tested on the laptop; `lib/link.ex` is
@@ -225,6 +225,29 @@ matters. Change `config :raycaster, :mqtt` to use your own.
 
 To try it with one badge, `elixir scripts/ghosts.exs 3 120` makes three ghosts
 wander the map for two minutes.
+
+### What other players cost
+
+Every message from another badge costs about ten milliseconds of the chip's time:
+the socket, the MQTT client, the link, the game and the peer list, on something that
+does a million instructions a second. Measured by turning on the spot (the
+`RAYCASTER_AUTOPILOT=1` build switch, so every run casts the same views; 
+`RAYCASTER_OFFLINE=1` leaves the network out), at five updates a second:
+
+| | fps | ray casting | drawing |
+|---|---|---|---|
+| alone, no network | 19.2 | 25.4 ms | 49.8 ms |
+| online, nobody else | 16.2 | 32.3 ms | 56.9 ms |
+| 3 others | 12.6 | 46.6 ms | 70.5 ms |
+| 8 others | 8.8 | 81.3 ms | 104.5 ms |
+
+Being connected costs about 7 ms, and each other player about 6 ms a frame; the
+figures themselves cost nothing to speak of (the rectangle counts did not change).
+So the fix was fewer messages, not less drawing: two updates a second, with
+`Raycaster.Peers` carrying each player along from its last two positions for up to
+600 ms, and never off the map. Now 17.2, 15.7 and 13.2 fps for nobody, 3 and 8
+others, with 8 others casting in 54 ms. Each other player still costs about 3 ms a
+frame, so twelve moving at once (the most it keeps track of) would hurt.
 
 Figures are hidden by a walk along the line to them, a quarter cell at a time, not
 by a ray per column, so someone half behind a corner is either seen or not.
