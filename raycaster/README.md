@@ -113,13 +113,51 @@ exist, and how fast the badge can take frames over Wi-Fi, is untested.
 So this is the other route: a Doom-like written entirely in Elixir, drawn with the
 `rect` primitive the display already handles well.
 
-## Ideas
+## Todo
 
-- The sine table is still a literal, read a few times per frame (about 1 ms in
-  total). Passing it as an argument like the map would save that.
+Ray casting is around 85% of every frame, so most of the speed is in the first
+group.
+
+**Speed**
+
+- The sine table is still a literal, read a few times per frame. Passing it as an
+  argument like the map would save that. Estimated at about 1 ms per frame (four
+  reads at roughly 280 us each from the benchmark), not measured in the game.
+- Fewer arguments per ray step. A call with nine arguments costs about 14 us on
+  its own, and a step is one such call. Packing the per-ray constants into one
+  tuple would cut that. Also from the benchmark, not tried.
 - Lower the view distance (`@max_steps`) so rays in open rooms stop early.
-- Draw at 40 columns while moving and 80 while standing still.
-- Sprites, and other badges as sprites over MQTT.
+- Draw at 40 columns while moving and 80 while standing still. `@cols` is a
+  module attribute today, so it would have to become an argument.
+
+**Gameplay**
+
+- There is only a room to walk around in: no goal, enemies or shooting, and the
+  walls are flat colours, not textures.
+- One map, hard-coded in `lib/engine.ex`. Loading maps, or letting Claude
+  generate them, would need the map to come from outside the module.
+- The fps line in the corner is a permanent debug readout. Make it a toggle.
+- Sprites, and other badges as sprites over MQTT: each badge would publish its
+  position and the others would draw it as a sprite. Not designed beyond that.
+- Make it a mode of the chat badge (`../chat`), switched by a key, instead of a
+  separate firmware.
+
+**Not verified**
+
+- The badge's key matrix may have no diodes, in which case holding three keys at
+  once (forward, turn and strafe) can produce ghost keys. The controls were
+  confirmed to work, but not with several keys held at once.
+- Whether AtomGL can take frames in a format other than `rgba8888`, and how fast
+  the badge can receive them over Wi-Fi. This decides whether streaming real Doom
+  to the badge would work (see above).
+
+**Housekeeping**
+
+- Only `Raycaster.Engine` has tests. The game loop, screen and keyboard need the
+  badge, and there is no CI.
+- The repo has no LICENSE, and the keyboard code is copied into both `chat/` and
+  `raycaster/` from the workshop exercise, which has none either. The credit
+  below is the only record of where it came from.
 
 ## Credits
 
