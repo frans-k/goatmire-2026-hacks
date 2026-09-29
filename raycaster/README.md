@@ -192,6 +192,52 @@ Walking now reads 11 fps on average and 15 at best, casting in about 33 ms with
 the panel taking 65: the panel, not the engine, is the limit. The earlier 18 to 22
 fps were frames the game made and the panel never showed.
 
+## Playing with others
+
+Every badge running this joins one MQTT broker, publishes where it is, and draws
+the others as small coloured figures, hidden behind walls. The line under the fps
+one says `online, 3 playing`, or `offline` when there is no wifi.
+
+Give it your wifi in `config/config_local.exs`, which is not in git:
+
+```elixir
+import Config
+config :raycaster, :wifi, ssid: "my network", psk: "my password"
+```
+
+then `mix compile --force` and flash as usual (the credentials are read while
+compiling, so a change needs the recompile). Without them the game starts as
+before and you walk around alone. Joining wifi happens beside the game, so it
+never waits for it.
+
+A badge publishes 9 bytes, `<<x::16, y::16, a::16, r, g, b>>`, to
+`goatmire/raycaster/v1/<chip id>` about five times a second while it moves and once
+a second while it stands, and listens on `goatmire/raycaster/v1/+`. An empty message
+on its own topic means it has left, which is what the broker sends for a badge that
+dies (its last will). A badge not heard from for four seconds is forgotten. It is
+all in `lib/wire.ex` and `lib/peers.ex`, both tested on the laptop; `lib/link.ex` is
+the MQTT session, and `Engine.sprites/5` draws the figures.
+
+**The default broker, `test.mosquitto.org`, is open to everyone.** Anyone can read
+where you are or publish fake players. Bytes that do not decode, or that put a badge
+outside the map, are dropped. Fine for a badge at a party; not for anything that
+matters. Change `config :raycaster, :mqtt` to use your own.
+
+To try it with one badge, `elixir scripts/ghosts.exs 3 120` makes three ghosts
+wander the map for two minutes.
+
+Figures are hidden by a walk along the line to them, a quarter cell at a time, not
+by a ray per column, so someone half behind a corner is either seen or not.
+
+### In the official badge firmware
+
+**It does not fit yet.** The firmware's `main.avm` slot is 671,744 bytes and its
+packed app is 663,220, so there is 8.5 KB to spare. A page with this engine alone
+added 10,512 bytes when measured, 2 KB over, and with multiplayer and amqtt the
+image was 706,456 bytes, 43,236 more than the firmware's. An image over the slot is
+cut off when it is loaded, and the badge crashes at boot. Multiplayer is only in
+this project for now.
+
 ## Why not real Doom?
 
 The question this started from: how do people run Doom on odd hardware, and can
