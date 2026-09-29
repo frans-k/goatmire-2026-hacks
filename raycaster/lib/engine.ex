@@ -78,6 +78,14 @@ defmodule Raycaster.Engine do
   # Nearer than this a figure is inside the player, and its size would run away.
   @nearest 64
   @skin 0xF0D0A8
+  @goat_fur 0xE6E0D2
+  @goat_face 0xD2CABA
+  @goat_beard 0xB4AC9C
+  @goat_dark 0x3C3228
+  @goat_calm 0xE8B820
+  @goat_angry 0xFF2010
+  # Pixels tall below which the goat is drawn in five rectangles.
+  @goat_detail 64
 
   # How close to a wall the player may get, in Q8.
   @radius 60
@@ -172,9 +180,11 @@ defmodule Raycaster.Engine do
   Other players as small figures, to go in front of what `frame/4` returns.
 
   `others` is a list of `{x, y, colour}`, positions in the same Q8 as the
-  player's. A figure is a head and a body, sized by how far away it is, and it is
-  left out when it is behind the player, off to the side of the view, or hidden
-  by a wall. The nearest come first, since the first item is drawn on top.
+  player's, and may hold `{:goat, x, y, hunting}` for the evil goat. A player is
+  a head and a body, the goat a front view of one charging at you, whose eyes go
+  red while `hunting` is true. Both are sized by how far away they are, and left
+  out when behind the player, off to the side of the view, or hidden by a wall.
+  The nearest come first, since the first item is drawn on top.
 
   Each figure costs a walk along the line to it, not a ray per column, and the
   test is all or nothing: someone half behind a corner is either seen or not.
@@ -201,7 +211,14 @@ defmodule Raycaster.Engine do
 
   defp figures(_view, [], acc), do: acc
 
-  defp figures(view, [{ox, oy, colour} | rest], acc) do
+  defp figures(view, [{ox, oy, colour} | rest], acc),
+    do: figures(view, rest, place(acc, view, ox, oy, colour))
+
+  defp figures(view, [{:goat, ox, oy, hunting} | rest], acc),
+    do: figures(view, rest, place(acc, view, ox, oy, {:goat, hunting}))
+
+  # `what` is a player's colour, or `{:goat, hunting}`.
+  defp place(acc, view, ox, oy, what) do
     {_grid, x, y, dir_x, dir_y, plane_x, plane_y, det, _width, _height} = view
 
     rel_x = ox - x
@@ -209,24 +226,64 @@ defmodule Raycaster.Engine do
     depth = div(plane_x * rel_y - plane_y * rel_x, det)
     across = div(dir_y * rel_x - dir_x * rel_y, det)
 
-    acc = if depth >= @nearest, do: seen(acc, view, ox, oy, depth, across, colour), else: acc
-
-    figures(view, rest, acc)
+    if depth >= @nearest, do: seen(acc, view, ox, oy, depth, across, what), else: acc
   end
 
   # Off to the side of the view costs nothing: the walk along the line to a figure
   # is only made for one that could be seen, which is a fraction of them.
-  defp seen(acc, view, ox, oy, depth, across, colour) do
+  defp seen(acc, view, ox, oy, depth, across, what) do
     {grid, x, y, _dir_x, _dir_y, _plane_x, _plane_y, _det, width, height} = view
 
     centre = div(width * (depth + across), 2 * depth)
     line = div(height * 256, depth)
 
     if centre + line > 0 and centre - line < width and visible?(grid, x, y, ox, oy) do
-      add_figure(acc, depth, centre, line, colour, width, height)
+      add_figure(acc, depth, centre, line, what, width, height)
     else
       acc
     end
+  end
+
+  # `line` is how tall a wall would be at this distance. The goat is drawn in
+  # hundredths of `size`, a little more than `line` so that it looms over the
+  # players, with `part/7` below, from the floor line up: 16 of legs, a body to
+  # 36, the head to 50 and horns curling out to 66. The first part is on top, so
+  # eyes and beard come before the head they sit on. Far off, where most parts
+  # would be a pixel, it is five rectangles instead of thirteen.
+  defp add_figure(acc, depth, centre, line, {:goat, hunting}, width, height) do
+    size = div(line * 6, 5)
+    at = {centre, div(height + line, 2), size, width, height}
+
+    fur = shade(@goat_fur, depth)
+    face = shade(@goat_face, depth)
+    dark = shade(@goat_dark, depth)
+    # Unshaded, so they shine out of the dark corridors.
+    eyes = if hunting, do: @goat_angry, else: @goat_calm
+
+    items =
+      if size < @goat_detail do
+        part(at, -7, 43, 4, 3, eyes) ++
+          part(at, 3, 43, 4, 3, eyes) ++
+          part(at, -9, 50, 18, 22, face) ++
+          part(at, -18, 36, 36, 21, fur) ++
+          part(at, -14, 16, 28, 16, dark)
+      else
+        part(at, -7, 43, 4, 3, eyes) ++
+          part(at, 3, 43, 4, 3, eyes) ++
+          part(at, -3, 30, 6, 9, shade(@goat_beard, depth)) ++
+          part(at, -13, 66, 6, 5, dark) ++
+          part(at, 7, 66, 6, 5, dark) ++
+          part(at, -9, 62, 5, 13, dark) ++
+          part(at, 4, 62, 5, 13, dark) ++
+          part(at, -9, 50, 18, 22, face) ++
+          part(at, -19, 47, 10, 5, face) ++
+          part(at, 9, 47, 10, 5, face) ++
+          part(at, -18, 36, 36, 21, fur) ++
+          part(at, -14, 16, 7, 16, dark) ++
+          part(at, 7, 16, 7, 16, dark)
+      end
+
+    [{depth, items} | acc]
   end
 
   # `line` is how tall a wall would be at this distance. A figure is 6/10 of it,
@@ -246,6 +303,18 @@ defmodule Raycaster.Engine do
         clip({:rect, centre - div(head, 2), top, head, head, @skin}, width, height)
 
     [{depth, items} | acc]
+  end
+
+  # A rectangle of the goat, in hundredths of its size: `left` from the centre, `up`
+  # from the floor to its top, `w` wide and `h` tall. At least a pixel each way,
+  # so a far goat keeps its eyes.
+  defp part({centre, floor, size, width, height}, left, up, w, h, colour) do
+    clip(
+      {:rect, centre + div(size * left, 100), floor - div(size * up, 100),
+       max(div(size * w, 100), 1), max(div(size * h, 100), 1), colour},
+      width,
+      height
+    )
   end
 
   defp flatten_figures([]), do: []

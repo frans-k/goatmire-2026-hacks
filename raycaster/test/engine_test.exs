@@ -194,6 +194,79 @@ defmodule Raycaster.EngineTest do
     end
   end
 
+  describe "the goat in sprites/5" do
+    @calm 0xE8B820
+    @angry 0xFF2010
+
+    defp goat(player, goats), do: Engine.sprites(Engine.grid(), player, goats, @width, @height)
+
+    defp facing_east_again, do: %{x: 2 * @cell + 128, y: 9 * @cell + 128, a: 0}
+
+    defp goat_ahead(cells, hunting \\ false, across \\ 0) do
+      {:goat, 2 * @cell + 128 + cells * @cell, 9 * @cell + 128 + across, hunting}
+    end
+
+    defp colours(items), do: for({:rect, _x, _y, _w, _h, c} <- items, do: c)
+    defp widest(items), do: Enum.max_by(items, fn {:rect, _x, _y, w, _h, _c} -> w end)
+
+    test "near, it is thirteen rectangles in the middle of the screen" do
+      items = goat(facing_east_again(), [goat_ahead(2)])
+      {:rect, x, _y, w, _h, _c} = widest(items)
+
+      assert length(items) == 13
+      assert abs(x + div(w, 2) - div(@width, 2)) <= 2
+    end
+
+    test "far off, it is five" do
+      assert length(goat(facing_east_again(), [goat_ahead(9)])) == 5
+    end
+
+    test "its eyes are yellow, and red while it hunts, and come first" do
+      assert [@calm, @calm | rest] = colours(goat(facing_east_again(), [goat_ahead(3)]))
+      refute @angry in rest
+
+      assert [@angry, @angry | _rest] = colours(goat(facing_east_again(), [goat_ahead(3, true)]))
+      assert [@angry, @angry | _rest] = colours(goat(facing_east_again(), [goat_ahead(9, true)]))
+    end
+
+    test "it stands on the same floor line as a player" do
+      bottom = fn items ->
+        items |> Enum.map(fn {:rect, _x, y, _w, h, _c} -> y + h end) |> Enum.max()
+      end
+
+      player = {2 * @cell + 128 + 4 * @cell, 9 * @cell + 128, 0xC83C32}
+
+      assert abs(
+               bottom.(goat(facing_east_again(), [goat_ahead(4)])) -
+                 bottom.(goat(facing_east_again(), [player]))
+             ) <= 1
+    end
+
+    test "everything stays on the screen" do
+      for cells <- [1, 2, 3, 6, 10], across <- [-600, -200, 0, 200, 600], hunting <- [true, false] do
+        for {:rect, x, y, w, h, _c} <- goat(facing_east_again(), [goat_ahead(cells, hunting, across)]) do
+          assert x >= 0 and y >= 0 and w > 0 and h > 0
+          assert x + w <= @width and y + h <= @height
+        end
+      end
+    end
+
+    test "it hides behind walls like anyone" do
+      # Row 2 has a wall at columns 3 to 6.
+      player = %{x: 2 * @cell + 128, y: 2 * @cell + 128, a: 0}
+
+      assert goat(player, [{:goat, 8 * @cell + 128, 2 * @cell + 128, true}]) == []
+    end
+
+    test "a goat nearer than a player is drawn on top of them" do
+      player = {2 * @cell + 128 + 5 * @cell, 9 * @cell + 128, 0xC83C32}
+      items = goat(facing_east_again(), [player, goat_ahead(2, true)])
+
+      assert [@angry, @angry | _rest] = colours(items)
+      assert length(items) == 15
+    end
+  end
+
   describe "the map" do
     # Rays are not bounds checked and have no step limit: the outer wall is what
     # stops them.

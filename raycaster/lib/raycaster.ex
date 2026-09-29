@@ -34,6 +34,9 @@ defmodule Raycaster do
   # Turns on the spot by itself, for measuring, see config/config.exs.
   @autopilot Application.compile_env!(:raycaster, :autopilot)
 
+  # A goat standing still, to look at, see config/config.exs.
+  @goat Application.compile_env!(:raycaster, :goat)
+
   @report_ms 1000
 
   # How often to say where we are. The relay hands out one snapshot a second and
@@ -155,7 +158,8 @@ defmodule Raycaster do
     player = Engine.step(grid, player, held, t0 - last)
     net = announce(net, player, t0)
 
-    items = Engine.sprites(grid, player, net.others, Screen.width(), Screen.height())
+    others = if @goat, do: [{:goat, 10 * 256 + 128, 384, true} | net.others], else: net.others
+    items = Engine.sprites(grid, player, others, Screen.width(), Screen.height())
     items = items ++ Engine.frame(grid, player, Screen.width(), Screen.height())
     t1 = now()
 
