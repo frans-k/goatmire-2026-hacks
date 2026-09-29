@@ -6,7 +6,9 @@ defmodule Relay.Goat do
 
   It wanders from one random open cell to another until it sees a player, then
   hunts them: straight at them while they are in sight, faster than it wanders
-  but slower than a badge walks (800), so running away works. When it loses
+  but slower than a badge walks (800), so running away works. It has two paces:
+  `:calm`, to start with, and `:fast`, which the room asks for once someone in it
+  has lasted a while (see `Relay.Rooms.step_goats/3`). When it loses
   sight of them it goes to where it last saw them and searches there for a few
   seconds before wandering again. Nearer than half a cell to a player is a catch.
 
@@ -18,8 +20,9 @@ defmodule Relay.Goat do
 
   alias Relay.Level
 
-  @wander_speed 350
-  @hunt_speed 450
+  # Wandering and hunting, in the badges' fixed point per second, by pace.
+  @calm {250, 330}
+  @fast {350, 450}
   # How far it sees: eight cells.
   @sight 2_048
   @reach 128
@@ -57,12 +60,15 @@ defmodule Relay.Goat do
   def where(goat), do: {round(goat.x), round(goat.y), goat.mode != :wander}
 
   @doc """
-  Moves the goat on by `dt_ms` at `now`. `players` is `[{id, x, y}]`, everyone it
-  may hunt. Returns the goat and the ids of those it has caught.
+  Moves the goat on by `dt_ms` at `now`, at `pace` (`:calm` or `:fast`). `players`
+  is `[{id, x, y}]`, everyone it may hunt. Returns the goat and the ids of those it
+  has caught.
   """
-  @spec step(t, [{term, number, number}], non_neg_integer, integer) :: {t, [term]}
-  def step(goat, players, dt_ms, now) do
-    goat = goat |> look(players, now) |> move(players, dt_ms)
+  @spec step(t, [{term, number, number}], non_neg_integer, integer, :calm | :fast) ::
+          {t, [term]}
+  def step(goat, players, dt_ms, now, pace \\ :calm) do
+    {wander, hunt} = if pace == :fast, do: @fast, else: @calm
+    goat = goat |> look(players, now) |> move(dt_ms, wander, hunt)
     {goat, for({id, x, y} <- players, distance(goat, x, y) < @reach, do: id)}
   end
 
@@ -93,9 +99,9 @@ defmodule Relay.Goat do
     end
   end
 
-  defp move(%{mode: :hunt} = goat, _players, dt_ms) do
+  defp move(%{mode: :hunt} = goat, dt_ms, _wander, hunt) do
     {gx, gy} = goat.goal
-    step = @hunt_speed * dt_ms / 1000
+    step = hunt * dt_ms / 1000
     {x, y} = towards(goat.x, goat.y, gx, gy, step)
 
     # Straight at them, unless that clips a corner: then round it.
@@ -104,12 +110,12 @@ defmodule Relay.Goat do
       else: route(goat, goat.goal, step)
   end
 
-  defp move(%{mode: :search} = goat, _players, dt_ms),
-    do: route(goat, goat.goal, @hunt_speed * dt_ms / 1000)
+  defp move(%{mode: :search} = goat, dt_ms, _wander, hunt),
+    do: route(goat, goat.goal, hunt * dt_ms / 1000)
 
-  defp move(%{mode: :wander} = goat, _players, dt_ms) do
+  defp move(%{mode: :wander} = goat, dt_ms, wander, _hunt) do
     goat = if arrived?(goat), do: wander_to(goat), else: goat
-    route(goat, goat.goal, @wander_speed * dt_ms / 1000)
+    route(goat, goat.goal, wander * dt_ms / 1000)
   end
 
   defp arrived?(%{goal: nil}), do: true

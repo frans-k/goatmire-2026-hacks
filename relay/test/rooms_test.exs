@@ -220,5 +220,31 @@ defmodule Relay.RoomsTest do
       assert Rooms.respawn(state, :a, 100) == state
       assert Rooms.respawn(state, :nobody, 100) == state
     end
+
+    test "is calm until someone has lasted thirty seconds, and calm again once they are out" do
+      {state, _places} = join_all(Rooms.new(), [:a, :b])
+      state = state |> Rooms.move(:a, 384, 384, 0) |> Rooms.move(:b, 384, 384, 20_000)
+      players = fn state -> state.rooms[1] end
+
+      assert Rooms.pace(players.(state), 29_000) == :calm
+
+      state = Rooms.move(state, :a, 390, 384, 29_500)
+      assert Rooms.pace(players.(state), 30_000) == :fast
+
+      # :a is caught: only :b, twenty seconds in, is left.
+      state = put_in(state, [:rooms, 1, 1, :out], true)
+      assert Rooms.pace(players.(state), 30_000) == :calm
+    end
+
+    test "coming back starts the thirty seconds again" do
+      {state, _place} = Rooms.join(Rooms.new(), :a)
+      state = Rooms.move(state, :a, 384, 384, 0)
+      state = put_in(state, [:rooms, 1, 1, :out], true)
+      state = state |> Rooms.respawn(:a, 40_000) |> Rooms.move(:a, 384, 384, 41_000)
+
+      assert Rooms.pace(state.rooms[1], 45_000) == :calm
+      state = Rooms.move(state, :a, 390, 384, 70_000)
+      assert Rooms.pace(state.rooms[1], 71_000) == :fast
+    end
   end
 end

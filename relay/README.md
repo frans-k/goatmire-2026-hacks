@@ -106,15 +106,19 @@ Every room has a goat, `lib/relay/goat.ex`, moved here and drawn by the badges. 
 made with the room, in the open cell farthest from where the badges start, and goes
 with it.
 
-- It **wanders** at 350 (a badge walks at 800, in the same fixed point per second)
+- It **wanders** at 250 (a badge walks at 800, in the same fixed point per second)
   to one random open cell after another, the shortest way through the cells.
 - It **hunts** the nearest player it can see within eight cells, straight at them at
-  450, rounding a corner if the straight line would clip one. It sees along the same
+  330, rounding a corner if the straight line would clip one. It sees along the same
   quarter cell walk a badge uses to hide figures, so it sees you when you could see
   it.
 - When it loses sight of them it **searches**: it goes to where it last saw them and
   stays there for four seconds, then wanders again. It does not follow anyone it
   cannot see.
+- It **speeds up** to 350 wandering and 450 hunting while anyone in the room has
+  lasted thirty seconds, counted from the first position they sent after joining or
+  coming back. When they are caught, or leave, it is calm again. Before this it
+  hunted at 600, which on a badge felt fast and hard to shake off.
 - Nearer than half a cell to a player is a **catch**. The player is out: left out of
   the snapshot, told `caught`, and not listened to until they send `respawn`. Then
   they are at the start again, and safe from the goat for three seconds.

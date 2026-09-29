@@ -17,6 +17,10 @@ defmodule Relay.Rooms do
   they caught. A caught player is out: left out of the snapshot and not listened
   to until they `respawn/3`, and then safe from the goat for `@grace_ms`, while
   they find their feet at the start again.
+
+  The goat starts calm and goes fast while anyone in its room has lasted
+  `@fast_after_ms`, counted from the first position they said after joining or
+  coming back. Once they are caught, or gone, it is calm again.
   """
 
   alias Relay.{Goat, Level}
@@ -30,6 +34,7 @@ defmodule Relay.Rooms do
   # The badges' map is 16 by 16 cells, 256 to a cell.
   @limit 4_096
   @grace_ms 3_000
+  @fast_after_ms 30_000
   # Where every badge starts, the cell the goat is put farthest from.
   @start {1, 1}
 
@@ -54,7 +59,7 @@ defmodule Relay.Rooms do
       _not_yet ->
         room = room_with_space(state)
         slot = free_slot(Map.get(state.rooms, room, %{}), state.max)
-        entry = %{x: nil, y: nil, seen: nil, out: false, safe_until: nil}
+        entry = %{x: nil, y: nil, seen: nil, out: false, safe_until: nil, since: nil}
 
         state = %{
           state
@@ -109,7 +114,8 @@ defmodule Relay.Rooms do
             state
 
           entry ->
-            put_in(state, [:rooms, room, slot], %{entry | x: x, y: y, seen: now})
+            since = entry.since || now
+            put_in(state, [:rooms, room, slot], %{entry | x: x, y: y, seen: now, since: since})
         end
 
       _unknown ->
@@ -164,7 +170,7 @@ defmodule Relay.Rooms do
             entry.safe_until == nil or now >= entry.safe_until,
             do: {slot, x, y}
 
-      {goat, slots} = Goat.step(goat, prey, dt_ms, now)
+      {goat, slots} = Goat.step(goat, prey, dt_ms, now, pace(players, now))
 
       players =
         Enum.reduce(slots, players, fn slot, players ->
@@ -192,11 +198,32 @@ defmodule Relay.Rooms do
   def respawn(state, member, now) do
     with %{^member => {room, slot}} <- state.where,
          %{out: true} = entry <- get_in(state, [:rooms, room, slot]) do
-      entry = %{entry | out: false, x: nil, y: nil, seen: nil, safe_until: now + @grace_ms}
+      entry = %{
+        entry
+        | out: false,
+          x: nil,
+          y: nil,
+          seen: nil,
+          since: nil,
+          safe_until: now + @grace_ms
+      }
+
       put_in(state, [:rooms, room, slot], entry)
     else
       _not_out -> state
     end
+  end
+
+  @doc "How fast the goat of a room with these players goes: `:fast` once one has lasted long enough."
+  @spec pace(%{pos_integer => map}, integer) :: :calm | :fast
+  def pace(players, now) do
+    lasted =
+      Enum.any?(players, fn {_slot, entry} ->
+        not entry.out and is_integer(entry.since) and is_integer(entry.seen) and
+          now - entry.seen < @ttl_ms and now - entry.since >= @fast_after_ms
+      end)
+
+    if lasted, do: :fast, else: :calm
   end
 
   @doc "Whether `member` has been caught and not come back yet."

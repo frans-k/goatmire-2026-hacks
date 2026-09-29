@@ -7,9 +7,9 @@ defmodule Relay.GoatTest do
 
   # Steps the goat `n` times, 100 ms apart, with the players standing still.
   # Returns the goat and everyone caught.
-  defp run(goat, players, n, now \\ 0) do
+  defp run(goat, players, n, now \\ 0, pace \\ :calm) do
     Enum.reduce(1..n, {goat, []}, fn i, {goat, caught} ->
-      {goat, more} = Goat.step(goat, players, 100, now + i * 100)
+      {goat, more} = Goat.step(goat, players, 100, now + i * 100, pace)
       {goat, caught ++ more}
     end)
   end
@@ -61,7 +61,7 @@ defmodule Relay.GoatTest do
 
   test "it runs someone in sight down and catches them" do
     {x, y} = at(9, 1)
-    {goat, caught} = run(Goat.new({14, 1}, 1), [{:a, x, y}], 30)
+    {goat, caught} = run(Goat.new({14, 1}, 1), [{:a, x, y}], 45)
 
     assert caught != []
     assert Enum.uniq(caught) == [:a]
@@ -102,12 +102,28 @@ defmodule Relay.GoatTest do
 
     goat =
       Enum.reduce(1..45, goat, fn i, goat ->
-        {goat, []} = Goat.step(goat, [], 100, i * 100)
+        {goat, []} = Goat.step(goat, [], 100, i * 100, :fast)
         assert Level.open?(goat.x, goat.y)
         goat
       end)
 
     assert cell(goat) == {2, 2}
     assert goat.mode == :search
+  end
+
+  test "fast, it hunts faster than calm, and wanders faster too" do
+    {x, y} = at(6, 1)
+    hunting = Goat.new({14, 1}, 1)
+    {calm, []} = run(hunting, [{:a, x, y}], 10, 0, :calm)
+    {fast, []} = run(hunting, [{:a, x, y}], 10, 0, :fast)
+
+    # One second: 330 against 450, give or take the first step spent deciding.
+    assert_in_delta 14 * 256 + 128 - calm.x, 330, 40
+    assert_in_delta 14 * 256 + 128 - fast.x, 450, 50
+
+    {calm, []} = run(Goat.new({14, 14}, 3), [], 10, 0, :calm)
+    {fast, []} = run(Goat.new({14, 14}, 3), [], 10, 0, :fast)
+    moved = fn goat -> abs(goat.x - (14 * 256 + 128)) + abs(goat.y - (14 * 256 + 128)) end
+    assert moved.(fast) > moved.(calm)
   end
 end
