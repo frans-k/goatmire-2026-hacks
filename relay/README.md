@@ -41,6 +41,26 @@ The image is about 500 MB because it is `elixir:slim` with the source compiled i
 not a release; the running server takes about 90 MB and next to no CPU with a few
 players. A release on a smaller base would be a good deal smaller. Not done.
 
+## On Fly.io
+
+`fly.toml` runs it as a single small machine (shared cpu, 256 MB; the server takes
+about 90 MB), with TLS ended by Fly, so badges use `wss://<app>.fly.dev`:
+
+```sh
+fly launch --no-deploy --copy-config    # the name in fly.toml may be taken
+fly secrets set RELAY_TOKEN=...
+fly deploy --ha=false
+fly scale count 1
+```
+
+**Exactly one machine.** The rooms live in memory, so a second machine is a second
+world, and Fly's default deploy makes two: hence `--ha=false`. It is never stopped
+either, since a stopped relay is an absent one.
+
+Nothing here has been deployed. `wss://` on a badge needs its clock set, because a
+certificate is not yet valid at the epoch: the firmware's chat waits for the time
+before it connects, and the standalone game does not set it yet.
+
 ## What it protects, and what it does not
 
 - The token is in every badge's firmware, so it keeps casual visitors out, not someone

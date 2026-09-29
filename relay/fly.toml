@@ -1,0 +1,36 @@
+# The relay on Fly.io. One machine only: the rooms live in its memory, so a second
+# machine would be a second, separate world that badges land in by luck.
+#
+#   fly launch --no-deploy --copy-config      # pick a name that is free
+#   fly secrets set RELAY_TOKEN=...           # the token badges are built with
+#   fly deploy --ha=false                     # --ha=false: one machine, not two
+#   fly scale count 1
+#
+# Fly ends TLS for us, so badges connect to wss://<app>.fly.dev.
+app = "goatmire-relay"
+primary_region = "arn"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  RELAY_MAX = "200"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # A relay that is asleep when a badge connects is a relay that is not there, and
+  # its rooms are gone when it stops.
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 250
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
