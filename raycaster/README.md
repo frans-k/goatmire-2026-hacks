@@ -369,6 +369,14 @@ players in a room, and a game over screen for whoever it catches. How it moves i
   the first 1.5 seconds, so one held while running does not skip it. A key sends
   `respawn` and starts again at the start. The line under the fps one says how long
   you have been alive.
+- The four LEDs warn you, through walls, before you see it (`lib/omen.ex`): dark
+  while the goat is more than seven cells off, a dark red ember crawling across
+  them within seven, red, purple and orange shifting round within four, a red and
+  white strobe within two while it hunts, and steady red under the game over
+  screen. A process of its own plays the pattern from frames encoded once, and the
+  game only tells it when the level changes. The driver is the chat badge's
+  (`lib/sk6812.ex`), on `spi3`, beside the display's `spi2`. Not yet seen on a
+  badge.
 - The badge says where it is twice a second instead of once, so the goat judges a
   catch on a fresher position. What that costs the badge is not measured.
 - Build with `RAYCASTER_GOAT=1` and a goat stands hunting at the end of the corridor
@@ -400,3 +408,5 @@ rooms, a goat of your own offline, and moving the goat smoothly between snapshot
 
 `lib/keyboard.ex` and `lib/keymap.ex` are adapted from the workshop's keyboard
 exercise, which reads the badge's 6x13 key matrix with interrupts.
+`lib/sk6812.ex` is adapted from `../chat/lib/sk6812.ex`, which drives the LEDs with
+the SPI peripheral as a waveform generator.

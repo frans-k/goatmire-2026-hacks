@@ -23,10 +23,11 @@ defmodule Raycaster do
   The relay also has an evil goat in every room, which hunts the players. When it
   catches this badge the relay says so, and the game shows `Raycaster.GameOver`
   until a key is pressed, then starts again at the beginning. The line under the
-  fps one says how long this life has lasted.
+  fps one says how long this life has lasted, and the LEDs how near the goat is,
+  see `Raycaster.Omen`.
   """
 
-  alias Raycaster.{Engine, GameOver, Keyboard, RelayLink, RelayWire, Screen, Wifi}
+  alias Raycaster.{Engine, GameOver, Keyboard, Omen, RelayLink, RelayWire, Screen, Wifi}
 
   # Read while compiling on the laptop: the badge never sees Application at all.
   @ssid Application.compile_env!(:raycaster, [:wifi, :ssid])
@@ -70,7 +71,19 @@ defmodule Raycaster do
     IO.puts("raycaster: badge #{id}")
 
     now = now()
-    net = %{link: nil, up: false, others: [], goat: nil, caught: false, alive_at: now, sent: nil}
+
+    net = %{
+      link: nil,
+      up: false,
+      others: [],
+      goat: nil,
+      caught: false,
+      alive_at: now,
+      sent: nil,
+      omen: Omen.start_link(),
+      dread: 0
+    }
+
     if @ssid != nil and @relay != nil, do: go_online(self(), id)
 
     stats = %{
@@ -171,7 +184,7 @@ defmodule Raycaster do
 
     t0 = now()
     player = Engine.step(grid, player, held, t0 - last)
-    net = announce(net, player, t0)
+    net = announce(net, player, t0) |> dread(player)
 
     others = goat(net.goat, net.others)
     items = Engine.sprites(grid, player, others, Screen.width(), Screen.height())
@@ -201,11 +214,27 @@ defmodule Raycaster do
 
   # The relay's goat goes in with the others; the switch in config/config.exs
   # stands one still at the end of the first corridor instead, to look at.
+  defp goat(goat, others) do
+    case the_goat(goat) do
+      nil -> others
+      {x, y, hunting} -> [{:goat, x, y, hunting} | others]
+    end
+  end
+
   if @goat do
-    defp goat(_goat, others), do: [{:goat, 10 * 256 + 128, 384, true} | others]
+    defp the_goat(_goat), do: {10 * 256 + 128, 384, true}
   else
-    defp goat(nil, others), do: others
-    defp goat({x, y, hunting}, others), do: [{:goat, x, y, hunting} | others]
+    defp the_goat(goat), do: goat
+  end
+
+  # Tells the LEDs how near the goat is, only when that has changed.
+  defp dread(net, player), do: feel(net, Omen.level(player, the_goat(net.goat)))
+
+  defp feel(%{dread: level} = net, level), do: net
+
+  defp feel(net, level) do
+    Omen.set(net.omen, level)
+    %{net | dread: level}
   end
 
   # Caught: the last frame goes out, then the game over screen, which stays until
@@ -220,7 +249,7 @@ defmodule Raycaster do
     send(presenter, {:frame, self(), items})
     shown(true)
 
-    net = await_key(now() + @over_ms, %{net | caught: false})
+    net = await_key(now() + @over_ms, feel(%{net | caught: false}, :caught))
     if net.link != nil, do: RelayLink.respawn(net.link)
 
     now = now()
