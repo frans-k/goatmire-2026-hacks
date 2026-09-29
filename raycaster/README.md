@@ -233,10 +233,13 @@ Next:
 - The column setup was trimmed (21.0 ms a frame, see above). What is left per
   column is mostly the arithmetic itself; a table of shaded colours passed in
   like the map would save the shading, perhaps 10%.
-- The keyboard scan takes about half the chip while a key is held (see above),
-  and with both cores busy drawing it is now the biggest cost left.
-  Scanning less often, only the rows with game keys, or with less work per row
-  would give it back. Left for now, because the input may change.
+- The keyboard scan was 18 ms while a key is held. It now reads the 13 columns
+  once and only those with a key in them for each row, which takes 5.7 ms
+  (2 keys held: 6.2 ms), timed against the old scan on the same key presses and
+  agreeing on all but the two scans that straddled a key change. Walking cast in
+  29.1 ms against 31.3, only about 2 ms, so the scan was not the 40% of a frame it
+  looked like: most of the gap between walking and standing is that walking views
+  cost more to cast. The scan is now cheap enough that it is not worth more work.
 - The second process is spawned afresh every frame, which copies the map into
   it each time. A worker that lives for the whole game and keeps its own copy
   of the map could get closer to the 1.5 times two processes allow, perhaps
