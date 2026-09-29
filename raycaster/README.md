@@ -17,6 +17,9 @@ mix atomvm.esp32.flash
 mix atomvm.esp32.monitor --timeout 20
 ```
 
+The engine is plain integer maths, so its geometry is tested on the laptop with
+`mix test`: known wall distances, staying on screen, collisions, turning.
+
 The monitor prints, once a second:
 
 ```text
@@ -53,6 +56,10 @@ screen and the call time is the display time.
 | 80 columns, map passed as an argument | 128 ms | 11 ms | 7 |
 | 40 columns | 66 ms | 10 ms | 12 to 13 |
 
+These were read with the player standing at the spawn point looking down the
+longest corridor. Ray cost depends on how far the rays travel, so the numbers
+move with the view.
+
 Three things fall out of this.
 
 **The display is not the bottleneck.** Pushing a frame takes about 10 ms. Casting
@@ -74,6 +81,35 @@ is why 80 columns cannot reach 15 frames per second.
 
 `lib/bench.ex` reproduces the micro-benchmarks. Set `start: Raycaster.Bench` in
 `mix.exs`, flash, and read the monitor.
+
+## Why not real Doom?
+
+The question this started from: how do people run Doom on odd hardware, and can
+the badge do something along those lines without replacing AtomVM?
+
+- **Port the engine.** Doom is portable C, and
+  [doomgeneric](https://github.com/klange/doomgeneric) reduces a port to five
+  functions: init, draw a frame, read keys, sleep, and the tick count. Anything
+  with a framebuffer, input and a few megabytes of RAM qualifies.
+- **Stream it.** The game runs elsewhere and the device is only a screen and
+  controller. [1-Bit Doom](https://www.sanderdesnaijer.com/projects/1-bit-doom)
+  runs Doom in a browser and sends dithered 128x64 frames (1 KB each) to an
+  ESP32 OLED over WebSocket at 15 to 20 fps.
+- **Emulate.** Put a CPU emulator on the device and run Doom inside it.
+
+Native Doom does not fit this badge. The ESP32-S3 ports, like
+[esp32-doom](https://github.com/arkadijs/esp32-doom), want at least 4 MB of PSRAM
+and around 16 MB of flash for the app and the game data; the badge has 2 MB and
+4 MB, and those ports replace the firmware rather than run on AtomVM.
+
+Streaming would work in principle. AtomGL has an `image` primitive,
+`{:image, X, Y, Background, {Format, Width, Height, Pixels}}`, but its
+[primitives documentation](https://github.com/atomvm/AtomGL/blob/main/docs/primitives.md)
+only shows `rgba8888`, which is 77 KB per frame at 160x120. Whether other formats
+exist, and how fast the badge can take frames over Wi-Fi, is untested.
+
+So this is the other route: a Doom-like written entirely in Elixir, drawn with the
+`rect` primitive the display already handles well.
 
 ## Ideas
 
