@@ -215,10 +215,14 @@ needs `mix compile --force`:
 RAYCASTER_RELAY=wss://relay.example.com RAYCASTER_RELAY_TOKEN=... mix atomvm.esp32.flash
 ```
 
-The wifi has to be 2.4 GHz. `wss://` is checked against certificates, which are not
-yet valid at the epoch, so the game waits for the badge's clock, up to 20 seconds,
-before it connects; `ws://host:4040` needs neither the wait nor TLS. Without wifi or a
-relay the game starts as before and you walk around alone. Joining wifi happens
+The wifi has to be 2.4 GHz. `wss://` gives TLS, checked against the certificates in the
+VM's bundle; `ws://host:4040` is plain. A badge joins `wss://` about four seconds after
+it boots, with no wait for its clock. A certificate is not yet valid at the epoch, and
+the firmware's chat waits for the time before it connects, so that surprised me: the
+wifi is given an SNTP host as the firmware's is, but I never saw the clock read as set
+(`:erlang.system_time` said it was not), and the certificate was accepted regardless. I
+do not know why. Without wifi or a relay the game starts as before and you walk around
+alone. Joining wifi happens
 beside the game, so it never waits for it.
 
 To try it with one badge, run the relay on the laptop (`cd ../relay && mix run

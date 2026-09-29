@@ -57,11 +57,12 @@ fly scale count 1
 world, and Fly's default deploy makes two: hence `--ha=false`. It is never stopped
 either, since a stopped relay is an absent one.
 
-`wss://` on a badge needs its clock set, because a certificate is not yet valid at the
-epoch. The standalone game waits for it (by looking at the clock, up to 20 seconds)
-before it opens a `wss://` connection. Tried once on hardware: a badge on home wifi,
-a token, `wss://goatmire-relay.fly.dev`, the driver said `Certificate validated`, the
-badge took a slot in room 1, and three ghosts across the internet were in it with it.
+A badge connects to `wss://` about four seconds after it boots, with no wait for its
+clock: tried on a badge on home wifi against `wss://goatmire-relay.fly.dev` with a
+token, the driver said `Certificate validated`, the badge took a slot in room 1, and
+three ghosts across the internet were in it with it. The firmware's chat waits for the
+time before it connects, because a certificate is not yet valid at the epoch, and I
+never saw the standalone game's clock read as set, so why it works is unexplained.
 
 ## What it protects, and what it does not
 
