@@ -15,7 +15,7 @@ primary_region = "arn"
 
 [env]
   PORT = "8080"
-  RELAY_MAX = "200"
+  RELAY_MAX = "300"
 
 [http_service]
   internal_port = 8080
@@ -28,8 +28,8 @@ primary_region = "arn"
 
   [http_service.concurrency]
     type = "connections"
-    soft_limit = 200
-    hard_limit = 250
+    soft_limit = 300
+    hard_limit = 350
 
 [[vm]]
   size = "shared-cpu-1x"

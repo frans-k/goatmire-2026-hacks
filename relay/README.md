@@ -25,7 +25,7 @@ Environment variables, read when it starts:
 |---|---|
 | `PORT` | the port badges connect to, 4040 |
 | `RELAY_TOKEN` | a token a badge must send as `?token=...`, or anyone may join |
-| `RELAY_MAX` | the most connections at once, in all rooms, 200 |
+| `RELAY_MAX` | the most connections at once, in all rooms, 300 |
 
 Badges are built with `RAYCASTER_RELAY=ws://host:4040` and, if there is a token,
 `RAYCASTER_RELAY_TOKEN=...` (letters, digits and `-_.~`). See `../raycaster`.
