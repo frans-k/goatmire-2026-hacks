@@ -34,7 +34,7 @@ Badges are built with `RAYCASTER_RELAY=ws://host:4040` and, if there is a token,
 
 ## The player dashboard
 
-`GET /` is a page anyone can open: how many are playing now, and by day how many different badges played and the most at once. It asks `GET /stats.json` every ten seconds, which has the same numbers for anything else that wants them, and `GET /status` is the old one-line text. It shows counts, never ids.
+`GET /` is a page anyone can open: how many are playing now, and by day how many different badges played and the most at once. It asks `GET /stats.json` every two seconds, which has the same numbers for anything else that wants them, and `GET /status` is the old one-line text. It shows counts, never ids.
 
 The counts are kept in `STATS_PATH`, one line for each new badge in a day (`U 2026-10-01 A0F262EE6F6C`) and each new most-at-once (`P 2026-10-01 37`), and read back when the server starts. **The file holds chip ids**, which derive from a badge's MAC address, so it and the volume's snapshots are not for sharing; the dashboard and `stats.json` do not show them. Only twelve hex digits count as a badge, so test scripts with other names are left out. The id is what the badge says it is: it is a count of badges that claim to be different.
 
