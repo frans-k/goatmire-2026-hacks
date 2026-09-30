@@ -9,14 +9,19 @@ defmodule Raycaster.RelayLink do
   `closed :normal` twice and never tried again, so on a close this closes it too and
   opens a new one a few seconds later. The owner, the game, is sent:
 
-    * `{:link, :up}` once the server has put this badge in a room, and `{:link, :down}`
-      when the connection is lost
+    * `{:link, :ready}` when the connection is up but this badge is not in a room, and
+      `{:link, :up}` once the server has put it in one, and `{:link, :down}` when the
+      connection is lost
     * `{:players, [{slot, x, y}], goat}` once a tick, everyone else in the room and
       the goat, `{x, y, hunting}` or nil
     * `:caught` when the goat has caught this badge
 
   `publish/3` says where this badge stands, and `respawn/1` that it is back after
   being caught; both are dropped while not in a room.
+
+  The room is only joined while it is wanted. It is wanted from the start with
+  `join: true` in the options, and otherwise from `join/1` on, until `leave/1`, which goes
+  out of the room at once and frees its slot, and the connection stays open.
   """
 
   use GenServer
@@ -36,6 +41,12 @@ defmodule Raycaster.RelayLink do
   @doc "Back in the game after being caught."
   def respawn(link), do: GenServer.cast(link, :respawn)
 
+  @doc "Goes out of the room, and stays out until `join/1`."
+  def leave(link), do: GenServer.cast(link, :leave)
+
+  @doc "Joins a room, now if the connection is up and otherwise as soon as it is."
+  def join(link), do: GenServer.cast(link, :join)
+
   @impl true
   def init(opts) do
     # Whatever goes wrong in here must not take the game with it, but it should be said.
@@ -50,6 +61,9 @@ defmodule Raycaster.RelayLink do
           Keyword.get(opts, :token)
         ),
       port: nil,
+      # Whether the connection is up, and whether a room is wanted.
+      connected: false,
+      wanted: Keyword.get(opts, :join, true),
       # How many times the room has been joined: each join is its own ref.
       joins: 0,
       slot: nil,
@@ -80,6 +94,28 @@ defmodule Raycaster.RelayLink do
     {:noreply, state}
   end
 
+  def handle_cast(:leave, state) do
+    state = %{state | wanted: false}
+
+    if state.slot != nil do
+      state = %{state | ref: state.ref + 1}
+      send_text(state.port, RelayWire.leave(join_ref(state), Integer.to_string(state.ref)))
+      send(state.owner, {:link, :ready})
+      {:noreply, %{state | slot: nil}}
+    else
+      {:noreply, state}
+    end
+  end
+
+  # Not in a room, and the connection is up: say hello now. Not up yet: it will, on connecting.
+  def handle_cast(:join, %{slot: nil, connected: true} = state) do
+    state = %{state | wanted: true, joins: state.joins + 1}
+    send_text(state.port, RelayWire.join(join_ref(state)))
+    {:noreply, state}
+  end
+
+  def handle_cast(:join, state), do: {:noreply, %{state | wanted: true}}
+
   def handle_cast(_message, state), do: {:noreply, state}
 
   @impl true
@@ -107,8 +143,13 @@ defmodule Raycaster.RelayLink do
   # port term is not the one open/1 returned, and a pinned match drops every
   # message without a word.
   def handle_info({:websocket, _port, :connected}, state) do
-    state = %{state | joins: state.joins + 1, slot: nil}
-    send_text(state.port, RelayWire.join(join_ref(state)))
+    state = %{state | joins: state.joins + 1, slot: nil, connected: true}
+
+    if state.wanted do
+      send_text(state.port, RelayWire.join(join_ref(state)))
+    else
+      send(state.owner, {:link, :ready})
+    end
 
     {:noreply, state}
   end
@@ -137,6 +178,13 @@ defmodule Raycaster.RelayLink do
 
   def handle_info(_message, state), do: {:noreply, state}
 
+  # A join that was answered after leaving was asked for: out again, and not said to the game.
+  defp heard({:joined, _room, _slot, _max}, %{wanted: false} = state) do
+    state = %{state | ref: state.ref + 1}
+    send_text(state.port, RelayWire.leave(join_ref(state), Integer.to_string(state.ref)))
+    state
+  end
+
   defp heard({:joined, room, slot, max}, state) do
     IO.puts("Relay: room #{room}, slot #{slot} of #{max}")
     send(state.owner, {:link, :up})
@@ -164,7 +212,7 @@ defmodule Raycaster.RelayLink do
   defp reopen(state) do
     close(state.port)
     Process.send_after(self(), :open, @retry_ms)
-    %{state | port: nil}
+    %{state | port: nil, connected: false}
   end
 
   defp close(port) do
@@ -174,8 +222,8 @@ defmodule Raycaster.RelayLink do
   end
 
   defp down(state) do
-    if state.slot != nil, do: send(state.owner, {:link, :down})
-    %{state | slot: nil}
+    if state.slot != nil or state.connected, do: send(state.owner, {:link, :down})
+    %{state | slot: nil, connected: false}
   end
 
   defp join_ref(state), do: Integer.to_string(state.joins)

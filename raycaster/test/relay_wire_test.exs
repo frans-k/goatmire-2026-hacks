@@ -20,6 +20,11 @@ defmodule Raycaster.RelayWireTest do
                ["1", "6", "raycaster:lobby", "respawn", %{}]
     end
 
+    test "leave says this badge is going out of the room, and nothing more" do
+      assert decode_json(RelayWire.leave("1", "8")) ==
+               ["1", "8", "raycaster:lobby", "phx_leave", %{}]
+    end
+
     test "the heartbeat has no join ref, and the phoenix topic" do
       assert decode_json(RelayWire.heartbeat()) == [:null, "0", "phoenix", "heartbeat", %{}]
     end

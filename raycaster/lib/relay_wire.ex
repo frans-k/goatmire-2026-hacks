@@ -8,6 +8,7 @@ defmodule Raycaster.RelayWire do
     * every tick the server sends `snap`, `{"p": [[slot, x, y], ...], "g": [x, y,
       hunting]}`: everyone in the room, this badge too, by slot, and the goat
     * `caught` when the goat has caught this badge, and `respawn` back to come back
+    * `phx_leave` to go out of the room and free the slot, and a new `phx_join` to come back
     * `heartbeat` on `phoenix` now and then, or Phoenix drops a quiet connection
 
   Pure: `Raycaster.RelayLink` owns the socket. Nothing here trusts the server more
@@ -51,6 +52,9 @@ defmodule Raycaster.RelayWire do
 
   @spec respawn(binary, binary) :: binary
   def respawn(join_ref, ref), do: frame(join_ref, ref, @topic, "respawn", %{})
+
+  @spec leave(binary, binary) :: binary
+  def leave(join_ref, ref), do: frame(join_ref, ref, @topic, "phx_leave", %{})
 
   @spec heartbeat() :: binary
   def heartbeat, do: frame(nil, "0", "phoenix", "heartbeat", %{})

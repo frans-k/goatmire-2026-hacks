@@ -4,6 +4,12 @@ A Wolfenstein-style 3D view in pure Elixir, running on the Goatmire 2026 badge
 under [AtomVM](https://atomvm.org). Walk around a small map with the badge
 keyboard: arrows or W A S D to move and turn, Q and E to strafe.
 
+It starts in a menu (Play, Controls, Status). Esc in the game goes back to it, and being in the
+menu means being out of the game: the badge leaves the relay's room, so nobody sees it and the
+goat cannot catch it, and Play starts a new life in a room, with the count from zero. Up and Down
+(or W and S) move, Enter or Space picks, Esc goes back. The badge does not join a room until you
+press Play. A build for measuring (`RAYCASTER_AUTOPILOT=1`) skips the menu.
+
 It runs at about 10 frames per second at 320x240 (7 to 13, depending on what
 you are looking at), drawn as 15 to 40 rectangles per frame. No native code, no firmware changes: AtomVM stays the platform.
 

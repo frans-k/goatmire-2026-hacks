@@ -2,7 +2,8 @@ defmodule Raycaster do
   @moduledoc """
   Walk around a small map with the badge keyboard.
 
-  Arrows or W A S D move and turn, Q and E strafe. Once a second it prints
+  Arrows or W A S D move and turn, Q and E strafe. It starts in `Raycaster.Menu`, and Esc
+  goes back to it, out of the game and out of the relay's room. Once a second it prints
   frames per second and where the time went (casting rays, or waiting for the
   display), and shows the same on screen.
 
@@ -27,7 +28,7 @@ defmodule Raycaster do
   see `Raycaster.Omen`.
   """
 
-  alias Raycaster.{Engine, GameOver, Keyboard, Omen, RelayLink, RelayWire, Screen, Wifi}
+  alias Raycaster.{Engine, GameOver, Keyboard, Menu, Omen, RelayLink, RelayWire, Screen, Wifi}
 
   # Read while compiling on the laptop: the badge never sees Application at all.
   @ssid Application.compile_env!(:raycaster, [:wifi, :ssid])
@@ -87,7 +88,12 @@ defmodule Raycaster do
       sent: nil,
       omen: Omen.start_link(),
       dread: 0,
-      wifi: Wifi.credentials(@ssid, @psk, @nvs_wifi)
+      wifi: Wifi.credentials(@ssid, @psk, @nvs_wifi),
+      wifi_failed: false,
+      id: id,
+      menu: false,
+      in_game: false,
+      ready: false
     }
 
     if net.wifi != nil and @relay != nil, do: go_online(self(), id, net.wifi)
@@ -105,7 +111,13 @@ defmodule Raycaster do
       showing: false
     }
 
-    loop(presenter, grid, Engine.new(), [], now, stats, net)
+    # It starts in the menu. A measuring build has nobody to press Play, so it goes straight in.
+    if @autopilot do
+      loop(presenter, grid, Engine.new(), [], now, stats, %{net | in_game: true})
+    else
+      IO.puts("raycaster: menu")
+      menu(presenter, grid, stats, net, Menu.new())
+    end
   end
 
   # Joins wifi and then the relay, apart from the game, which cannot wait the
@@ -126,6 +138,7 @@ defmodule Raycaster do
 
         {:error, reason} ->
           IO.puts("Wifi failed: #{inspect(reason)}, playing alone")
+          send(game, {:link, :wifi_failed})
       end
     end)
   end
@@ -138,7 +151,14 @@ defmodule Raycaster do
   end
 
   defp link(game, id),
-    do: RelayLink.start_link(owner: game, base: @relay, chip: id, token: @relay_token)
+    do:
+      RelayLink.start_link(
+        owner: game,
+        base: @relay,
+        chip: id,
+        token: @relay_token,
+        join: @autopilot
+      )
 
   # Says why the link died, if it does, and starts it again a little later.
   defp watch(game, id) do
@@ -175,6 +195,16 @@ defmodule Raycaster do
 
   defp loop(presenter, grid, _player, _held, _last, stats, %{caught: true} = net),
     do: game_over(presenter, grid, stats, net)
+
+  # Esc: out of the game, and out of the room, so nobody sees this badge and the goat cannot
+  # catch it. The LEDs go dark, and the life so far is over: Play starts a new one.
+  defp loop(presenter, grid, _player, _held, _last, stats, %{menu: true} = net) do
+    IO.puts("raycaster: menu")
+    if net.link != nil, do: RelayLink.leave(net.link)
+
+    net = %{net | menu: false, in_game: false, up: false, others: [], goat: nil}
+    menu(presenter, grid, stats, feel(net, 0), Menu.new())
+  end
 
   defp loop(presenter, grid, player, held, last, stats, net) do
     {held, net} = drain(held, net)
@@ -347,6 +377,7 @@ defmodule Raycaster do
   # not taken for one long frame and the first step after it does not jump.
   defp idle(timeout, net) do
     receive do
+      {:key, :down, "Esc"} -> {[], now(), %{net | menu: true}}
       {:key, :down, label} -> {[label], now(), net}
       {:key, :up, _label} -> idle(timeout, net)
       {:link_pid, _link} = message -> {[], now(), heard(message, net)}
@@ -363,6 +394,7 @@ defmodule Raycaster do
   # display's `:shown` is in this mailbox as well, and is not this function's.
   defp drain(held, net) do
     receive do
+      {:key, :down, "Esc"} -> drain(held, %{net | menu: true})
       {:key, :down, label} -> drain([label | :lists.delete(label, held)], net)
       {:key, :up, label} -> drain(:lists.delete(label, held), net)
       {:link_pid, _link} = message -> drain(held, heard(message, net))
@@ -374,15 +406,97 @@ defmodule Raycaster do
     end
   end
 
-  defp heard({:link_pid, link}, net), do: %{net | link: link}
-  defp heard({:link, :up}, net), do: %{net | up: true, sent: nil}
-  defp heard({:link, :down}, net), do: %{net | up: false, others: [], goat: nil}
+  # A link that is new, after the last one died, comes up out of the room: into it, if a game is on.
+  defp heard({:link_pid, link}, net) do
+    if net.in_game, do: RelayLink.join(link)
+    %{net | link: link}
+  end
+
+  defp heard({:link, :up}, net), do: %{net | up: true, ready: true, sent: nil}
+  defp heard({:link, :ready}, net), do: %{net | up: false, ready: true, others: [], goat: nil}
+  defp heard({:link, :wifi_failed}, net), do: %{net | wifi_failed: true}
+  defp heard({:link, :down}, net), do: %{net | up: false, ready: false, others: [], goat: nil}
 
   # The relay's snapshot is everyone else in the room, ready to draw: a slot is a
   # colour, and there is nothing to carry along and nothing to expire. The goat
   # jumps from one to the next like everyone else.
   defp heard({:players, players, goat}, net), do: %{net | others: figures(players), goat: goat}
   defp heard(:caught, net), do: %{net | caught: true}
+
+  # The menu: where the game starts, and what Esc leaves it for. Being in it means being out of
+  # the game and out of the relay's room, so it does not matter who is playing or where the goat
+  # is. Whatever the relay says is still taken in, so the status screen is live.
+  defp menu(presenter, grid, stats, net, state) do
+    shown(stats.showing)
+
+    send(
+      presenter,
+      {:frame, self(), Menu.items(state, menu_info(net), Screen.width(), Screen.height())}
+    )
+
+    menu_wait(presenter, grid, %{stats | showing: true}, net, state)
+  end
+
+  defp menu_wait(presenter, grid, stats, net, state) do
+    receive do
+      {:key, :down, label} ->
+        case Menu.handle_key(state, label) do
+          :play -> play(presenter, grid, stats, net)
+          {:ok, ^state} -> menu_wait(presenter, grid, stats, net, state)
+          {:ok, state} -> menu(presenter, grid, stats, net, state)
+        end
+
+      {:key, :up, _label} ->
+        menu_wait(presenter, grid, stats, net, state)
+
+      {:link_pid, _link} = message ->
+        menu(presenter, grid, stats, heard(message, net), state)
+
+      {:link, _status} = message ->
+        menu(presenter, grid, stats, heard(message, net), state)
+
+      # Out of the room, but a snapshot or a catch that was already on its way can arrive.
+      {:players, _list, _goat} ->
+        menu_wait(presenter, grid, stats, net, state)
+
+      :caught ->
+        menu_wait(presenter, grid, stats, net, state)
+    end
+  end
+
+  # Into the game, as a new life: the start, a room joined again, and the count from nothing.
+  # The clock restarts, so the time in the menu is not taken for one long step.
+  defp play(presenter, grid, stats, net) do
+    IO.puts("raycaster: play")
+    shown(stats.showing)
+    if net.link != nil, do: RelayLink.join(net.link)
+
+    now = now()
+    stats = %{stats | at: now, frames: 0, ray: 0, wait: 0, draw: 0, drawn: nil, showing: false}
+    net = %{net | menu: false, in_game: true, caught: false, alive_at: now, sent: nil}
+
+    loop(presenter, grid, Engine.new(), [], now, stats, net)
+  end
+
+  # What the status screen says, a line each. The passphrase is never on screen.
+  defp menu_info(net) do
+    %{wifi: wifi_line(net), relay: relay_line(net), badge: "Badge: #{net.id}"}
+  end
+
+  defp wifi_line(%{wifi: nil}), do: "Wifi: not set"
+  defp wifi_line(%{wifi: {ssid, _psk}, wifi_failed: true}), do: "Wifi: could not join #{ssid}"
+  defp wifi_line(%{wifi: {ssid, _psk}, link: nil}), do: "Wifi: joining #{ssid}"
+  defp wifi_line(%{wifi: {ssid, _psk}}), do: "Wifi: #{ssid}"
+
+  defp relay_line(net) do
+    cond do
+      @relay == nil -> "Relay: none"
+      net.up -> "Relay: online, #{length(net.others) + 1} playing"
+      net.ready -> "Relay: ready"
+      net.link == nil -> "Relay: waiting for wifi"
+      true -> "Relay: connecting"
+    end
+  end
 
   defp report(%{frames: frames} = stats, now, rects) when now - stats.at >= @report_ms do
     # Rounded, so that standing still (one frame in a little over a second)
