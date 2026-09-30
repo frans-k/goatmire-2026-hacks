@@ -106,6 +106,18 @@ The PR is https://github.com/protolux-electronics/avm_badge/pull/49, a draft fro
    relay, and whether a public token and a hardcoded relay address (now
    `wss://evilgoat-relay.fly.dev`) belong in their firmware.
 
+## Copying a newer engine into avm_badge
+
+The firmware carries a byte-for-byte copy of `raycaster/lib/engine.ex` as
+`lib/raycaster/engine.ex`. As of PR #11 (the evil goat, 2026-09-30) the engine on this
+repo's `main` reads the map from `relay/priv/map.txt` **while compiling**
+(`@map Path.expand("../../relay/priv/map.txt", __DIR__)`). That file does not exist
+inside `avm_badge`, so copying today's engine there does not compile until the map rows
+are put in the file itself. The copy in `raycaster-page` and `raycaster-page-mp` is the
+older one, from before the goat, which had the rows inline. So: when syncing, check that
+`diff` is empty *or* that the only difference is where the map comes from, and re-measure
+the pack size, because the goat's engine changes are larger.
+
 ## Also stale
 
 `raycaster/README.md` on the goatmire-2026-hacks `main` still says the firmware page
