@@ -23,9 +23,10 @@ defmodule Relay.Socket do
   @behaviour WebSock
 
   alias Relay.Hub
+  alias Relay.Stats
 
   @impl true
-  def init(_opts), do: {:ok, %{joined: false}}
+  def init(opts), do: {:ok, %{joined: false, chip: Keyword.get(opts, :chip)}}
 
   @impl true
   def handle_in({text, [opcode: :text]}, state) do
@@ -43,6 +44,7 @@ defmodule Relay.Socket do
   defp handle_frame(join_ref, ref, "raycaster:lobby" = topic, "phx_join", _payload, state) do
     case Hub.join(self()) do
       {room, slot, max} ->
+        Stats.seen(state.chip)
         reply = ok_reply(join_ref, ref, topic, %{"room" => room, "slot" => slot, "max" => max})
         {:push, {:text, reply}, %{state | joined: true}}
 

@@ -210,9 +210,54 @@ defmodule Relay.RelayTest do
       assert "HTTP/1.1 426" <> _ = http_get("/badge/socket/websocket")
     end
 
-    test "the status page answers, and anything else is not found" do
-      assert "HTTP/1.1 200" <> _ = http_get("/")
+    # The whole reply, to the end: the page is longer than one read.
+    defp http_all(path) do
+      {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", 4041, [:binary, active: false])
+      :ok = :gen_tcp.send(socket, "GET #{path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+      reply = read_all(socket, "")
+      :gen_tcp.close(socket)
+      [head, body] = String.split(reply, "\r\n\r\n", parts: 2)
+      {head, body}
+    end
+
+    defp read_all(socket, acc) do
+      case :gen_tcp.recv(socket, 0, 2_000) do
+        {:ok, data} -> read_all(socket, acc <> data)
+        {:error, _closed} -> acc
+      end
+    end
+
+    test "the status line answers, and anything else is not found" do
+      assert {"HTTP/1.1 200" <> _, body} = http_all("/status")
+      assert body =~ "playing in"
       assert "HTTP/1.1 404" <> _ = http_get("/nothing/here")
+    end
+
+    test "the front page is the dashboard, and says nothing that could be a badge's id" do
+      assert {"HTTP/1.1 200" <> _ = head, body} = http_all("/")
+      assert head =~ ~r/content-type: text\/html/i
+      assert head =~ ~r/content-security-policy: default-src 'none'/i
+      assert body =~ "<title>Players online</title>"
+      assert body =~ "/stats.json"
+    end
+
+    test "stats.json says how many play now and the counts by day" do
+      client = connect()
+      Client.push(client, ["1", "1", @topic, "phx_join", %{}])
+      assert_receive {:frame, ^client, ["1", "1", @topic, "phx_reply", %{"status" => "ok"}]}, 1_000
+
+      assert {"HTTP/1.1 200" <> _ = head, body} = http_all("/stats.json")
+      assert head =~ ~r/content-type: application\/json/i
+      assert head =~ ~r/cache-control: no-store/i
+
+      stats = JSON.decode!(body)
+      assert stats["now"] == 1
+      assert stats["rooms"] == 1
+      assert is_binary(stats["today"])
+      assert is_list(stats["days"])
+      assert is_boolean(stats["persistent"])
+      # Counts, and no ids.
+      refute body =~ "TEST"
     end
   end
 
