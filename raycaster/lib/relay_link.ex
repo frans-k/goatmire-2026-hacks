@@ -3,9 +3,11 @@ defmodule Raycaster.RelayLink do
   The websocket to the relay server (see `relay/`), kept alive.
 
   The connection is the ESP-IDF websocket component's: it does the TCP, the TLS
-  and the framing on a task of its own, and reconnects by itself, so `:connected`
-  arrives on every reconnection and the room has to be joined each time. The owner,
-  the game, is sent:
+  and the framing on a task of its own. `:connected` arrives on every connection,
+  and the room has to be joined each time. The driver says it reconnects by itself,
+  but after the server closed the connection (a relay restarted, say) it said
+  `closed :normal` twice and never tried again, so on a close this closes it too and
+  opens a new one a few seconds later. The owner, the game, is sent:
 
     * `{:link, :up}` once the server has put this badge in a room, and `{:link, :down}`
       when the connection is lost
@@ -117,7 +119,7 @@ defmodule Raycaster.RelayLink do
 
   def handle_info({:websocket, _port, {:closed, reason}}, state) do
     IO.puts("Relay: closed #{inspect(reason)}")
-    {:noreply, down(state)}
+    {:noreply, state |> down() |> reopen()}
   end
 
   def handle_info({:websocket, _port, {:error, reason}}, state) do
@@ -154,6 +156,23 @@ defmodule Raycaster.RelayLink do
 
   defp heard(:ignore, state), do: state
 
+  # Gives up on this connection and opens another in a while. A close can be said
+  # more than once, and only the first one counts: after it there is no port until
+  # the new one opens.
+  defp reopen(%{port: nil} = state), do: state
+
+  defp reopen(state) do
+    close(state.port)
+    Process.send_after(self(), :open, @retry_ms)
+    %{state | port: nil}
+  end
+
+  defp close(port) do
+    :websocket_client.close(port)
+  catch
+    _kind, _reason -> :ok
+  end
+
   defp down(state) do
     if state.slot != nil, do: send(state.owner, {:link, :down})
     %{state | slot: nil}
@@ -161,10 +180,16 @@ defmodule Raycaster.RelayLink do
 
   defp join_ref(state), do: Integer.to_string(state.joins)
 
+  # While the connection is down the driver refuses, with `{:error, :not_connected}`
+  # by its documentation but a bare `:not_connected` on the badge, which crashed
+  # the link when only the first was matched. Whatever it says, a refusal is only
+  # said: what was sent is lost, and the next position replaces it anyway.
+  defp send_text(nil, _text), do: :ok
+
   defp send_text(port, text) do
     case :websocket_client.send_text(port, text) do
       :ok -> :ok
-      {:error, reason} -> IO.puts("Relay: refused #{inspect(reason)}")
+      refused -> IO.puts("Relay: refused #{inspect(refused)}")
     end
   end
 

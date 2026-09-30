@@ -379,6 +379,13 @@ players in a room, and a game over screen for whoever it catches. How it moves i
   badge.
 - The badge says where it is twice a second instead of once, so the goat judges a
   catch on a fresher position. What that costs the badge is not measured.
+- A badge now comes back by itself when the relay restarts. The websocket driver
+  says it reconnects on its own, but after the server closed the connection it
+  said `closed :normal` twice and never tried again, and a position sent while it
+  was down came back as a bare `:not_connected`, which crashed the link. So on a
+  close `RelayLink` closes it too and opens a new one three seconds later, and any
+  refusal to send is only logged. Tried on a badge with the relay stopped for five
+  seconds: it was back in its room about four seconds after the relay was.
 - Build with `RAYCASTER_GOAT=1` and a goat stands hunting at the end of the corridor
   ahead of where you start, to look at without a relay.
 
