@@ -18,9 +18,11 @@ defmodule Relay.Rooms do
   to until they `respawn/3`, and then safe from the goat for `@grace_ms`, while
   they find their feet at the start again.
 
-  The goat starts calm and goes fast while anyone in its room has lasted
-  `@fast_after_ms`, counted from the first position they said after joining or
-  coming back. Once they are caught, or gone, it is calm again.
+  The goat starts calm, goes fast while anyone in its room has lasted
+  `@fast_after_ms`, and faster still while anyone has lasted `@faster_after_ms`,
+  counted from the first position they said after joining or coming back. It
+  goes by whoever has lasted longest of those still in play, so once they are
+  caught, or gone, it slows down again.
   """
 
   alias Relay.{Goat, Level}
@@ -35,6 +37,7 @@ defmodule Relay.Rooms do
   @limit 4_096
   @grace_ms 3_000
   @fast_after_ms 30_000
+  @faster_after_ms 60_000
   # Where every badge starts, the cell the goat is put farthest from.
   @start {1, 1}
 
@@ -214,16 +217,24 @@ defmodule Relay.Rooms do
     end
   end
 
-  @doc "How fast the goat of a room with these players goes: `:fast` once one has lasted long enough."
-  @spec pace(%{pos_integer => map}, integer) :: :calm | :fast
+  @doc "How fast the goat of a room with these players goes, by whoever of them has lasted longest."
+  @spec pace(%{pos_integer => map}, integer) :: :calm | :fast | :faster
   def pace(players, now) do
-    lasted =
-      Enum.any?(players, fn {_slot, entry} ->
-        not entry.out and is_integer(entry.since) and is_integer(entry.seen) and
-          now - entry.seen < @ttl_ms and now - entry.since >= @fast_after_ms
+    longest =
+      players
+      |> Enum.flat_map(fn {_slot, entry} ->
+        if not entry.out and is_integer(entry.since) and is_integer(entry.seen) and
+             now - entry.seen < @ttl_ms,
+           do: [now - entry.since],
+           else: []
       end)
+      |> Enum.max(fn -> 0 end)
 
-    if lasted, do: :fast, else: :calm
+    cond do
+      longest >= @faster_after_ms -> :faster
+      longest >= @fast_after_ms -> :fast
+      true -> :calm
+    end
   end
 
   @doc "Whether `member` has been caught and not come back yet."

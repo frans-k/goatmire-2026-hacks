@@ -236,6 +236,14 @@ defmodule Relay.RoomsTest do
       assert Rooms.pace(players.(state), 30_000) == :calm
     end
 
+    test "is faster still once someone has lasted a minute" do
+      {state, _place} = Rooms.join(Rooms.new(), :a)
+      state = Rooms.move(state, :a, 384, 384, 0) |> Rooms.move(:a, 390, 384, 59_000)
+
+      assert Rooms.pace(state.rooms[1], 59_500) == :fast
+      assert Rooms.pace(state.rooms[1], 60_000) == :faster
+    end
+
     test "coming back starts the thirty seconds again" do
       {state, _place} = Rooms.join(Rooms.new(), :a)
       state = Rooms.move(state, :a, 384, 384, 0)

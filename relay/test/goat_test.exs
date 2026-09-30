@@ -116,10 +116,12 @@ defmodule Relay.GoatTest do
     hunting = Goat.new({14, 1}, 1)
     {calm, []} = run(hunting, [{:a, x, y}], 10, 0, :calm)
     {fast, []} = run(hunting, [{:a, x, y}], 10, 0, :fast)
+    {faster, []} = run(hunting, [{:a, x, y}], 10, 0, :faster)
 
     # One second: 330 against 450, give or take the first step spent deciding.
     assert_in_delta 14 * 256 + 128 - calm.x, 330, 40
     assert_in_delta 14 * 256 + 128 - fast.x, 450, 50
+    assert_in_delta 14 * 256 + 128 - faster.x, 520, 60
 
     {calm, []} = run(Goat.new({14, 14}, 3), [], 10, 0, :calm)
     {fast, []} = run(Goat.new({14, 14}, 3), [], 10, 0, :fast)

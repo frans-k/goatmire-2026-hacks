@@ -116,8 +116,10 @@ with it.
   stays there for four seconds, then wanders again. It does not follow anyone it
   cannot see.
 - It **speeds up** to 350 wandering and 450 hunting while anyone in the room has
-  lasted thirty seconds, counted from the first position they sent after joining or
-  coming back. When they are caught, or leave, it is calm again. Before this it
+  lasted thirty seconds, and to 400 and 520 while anyone has lasted a minute,
+  counted from the first position they sent after joining or coming back. It goes
+  by whoever has lasted longest, so when they are caught, or leave, it slows down
+  again. Before this it
   hunted at 600, which on a badge felt fast and hard to shake off.
 - Nearer than half a cell to a player is a **catch**. The player is out: left out of
   the snapshot, told `caught`, and not listened to until they send `respawn`. Then
