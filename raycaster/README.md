@@ -31,9 +31,10 @@ The monitor prints, once a second:
 
 `ray` is time spent casting rays and building the display list. The display
 takes each frame in a process of its own while the next is cast, and `wait` is
-how long the game still had to wait for it before sending the next. The same
-line is drawn in the top corner. Standing still with no key held, nothing is
-redrawn except that line, once a second, so it reads 1 fps.
+how long the game still had to wait for it before sending the next. Build with
+`RAYCASTER_STATS=1` and the same line is drawn in the top corner too; without it
+only the line saying who is playing is on screen. Standing still with no key
+held, nothing is redrawn except those lines, once a second, so it reads 1 fps.
 
 ## How it works
 
@@ -346,7 +347,6 @@ Next:
 - One map, `../relay/priv/map.txt`, built into `lib/engine.ex` while compiling.
   Loading maps at run time, or letting Claude generate them, would need the badge
   to get the map from outside the module, and the relay's goat to walk it too.
-- The fps line in the corner is a permanent debug readout. Make it a toggle.
 - Make it a mode of the chat badge (`../chat`), switched by a key, instead of a
   separate firmware.
 

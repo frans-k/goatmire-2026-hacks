@@ -27,6 +27,11 @@ config :raycaster, :relay_token, System.get_env("RAYCASTER_RELAY_TOKEN")
 # config_local.exs says. Read while compiling, like the rest.
 config :raycaster, :autopilot, System.get_env("RAYCASTER_AUTOPILOT") == "1"
 
+# RAYCASTER_STATS=1 draws the frames per second and where the time went in the top
+# corner, as the monitor prints them. Without it only the line saying who is
+# playing is on screen.
+config :raycaster, :stats, System.get_env("RAYCASTER_STATS") == "1"
+
 # RAYCASTER_GOAT=1 stands the evil goat in the corridor ahead of where you start,
 # hunting, to see it on the badge before the relay can send one.
 config :raycaster, :goat, System.get_env("RAYCASTER_GOAT") == "1"

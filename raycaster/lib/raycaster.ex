@@ -40,6 +40,9 @@ defmodule Raycaster do
   # Turns on the spot by itself, for measuring, see config/config.exs.
   @autopilot Application.compile_env!(:raycaster, :autopilot)
 
+  # The fps line on screen as well as on the monitor, see config/config.exs.
+  @stats Application.compile_env!(:raycaster, :stats)
+
   # A goat standing still, to look at, see config/config.exs.
   @goat Application.compile_env!(:raycaster, :goat)
 
@@ -195,7 +198,7 @@ defmodule Raycaster do
     # still going out.
     draw = shown(stats.showing)
     t2 = now()
-    send(presenter, {:frame, self(), [hud(stats.hud), status(net) | items]})
+    send(presenter, {:frame, self(), overlay(stats, net, items)})
 
     stats = %{
       stats
@@ -298,7 +301,16 @@ defmodule Raycaster do
 
   defp status(_net), do: line("connecting")
 
-  defp line(text), do: {:text, 4, 24, :default16px, 0x00FF00, 0x000000, text}
+  # The fps line on top, when it is built in, and who is playing under it, or at
+  # the top on its own.
+  if @stats do
+    defp overlay(stats, net, items), do: [hud(stats.hud), status(net) | items]
+    defp hud(text), do: {:text, 4, 4, :default16px, 0xFFFF00, 0x000000, text}
+    defp line(text), do: {:text, 4, 24, :default16px, 0x00FF00, 0x000000, text}
+  else
+    defp overlay(_stats, net, items), do: [status(net) | items]
+    defp line(text), do: {:text, 4, 4, :default16px, 0x00FF00, 0x000000, text}
+  end
 
   # How long the last frame took from being handed over to being on the panel.
   defp shown(false), do: 0
@@ -383,8 +395,6 @@ defmodule Raycaster do
   defp report(stats, _now, _rects), do: stats
 
   defp tenths(n), do: "#{div(n, 10)}.#{rem(n, 10)}"
-
-  defp hud(text), do: {:text, 4, 4, :default16px, 0xFFFF00, 0x000000, text}
 
   defp now, do: :erlang.monotonic_time(:millisecond)
 end
