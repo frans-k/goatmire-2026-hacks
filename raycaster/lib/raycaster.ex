@@ -242,7 +242,7 @@ defmodule Raycaster do
 
   # Caught: the last frame goes out, then the game over screen, which stays until
   # a key is pressed. Then the relay is told this badge is back, and it starts
-  # again where every badge starts, as if new.
+  # again at whichever spawn point is farther from the goat.
   defp game_over(presenter, grid, stats, net) do
     survived = div(now() - net.alive_at, 1000)
     IO.puts("raycaster: caught by the goat after #{survived} s")
@@ -257,7 +257,12 @@ defmodule Raycaster do
 
     now = now()
     stats = %{stats | at: now, frames: 0, ray: 0, wait: 0, draw: 0, drawn: nil, showing: false}
-    loop(presenter, grid, Engine.new(), [], now, stats, %{net | alive_at: now, sent: nil})
+
+    loop(presenter, grid, Engine.respawn(the_goat(net.goat)), [], now, stats, %{
+      net
+      | alive_at: now,
+        sent: nil
+    })
   end
 
   # The first key pressed from `from` on. Whatever the relay says meanwhile is

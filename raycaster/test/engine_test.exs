@@ -337,4 +337,14 @@ defmodule Raycaster.EngineTest do
       assert Engine.step(Engine.grid(), Engine.new(), [], 500) == Engine.new()
     end
   end
+  describe "respawn/1" do
+    test "comes back in the corner farthest from the goat" do
+      assert %{x: 384, y: 384} = Engine.respawn({13 * 256, 13 * 256, true})
+      assert %{x: 3456, y: 3456, a: 32_768} = Engine.respawn({384, 384, false})
+    end
+
+    test "without a goat it is the start" do
+      assert Engine.respawn(nil) == Engine.new()
+    end
+  end
 end

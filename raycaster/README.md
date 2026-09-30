@@ -367,7 +367,8 @@ players in a room, and a game over screen for whoever it catches. How it moves i
 - On `caught` the game draws `Raycaster.GameOver` once: the goat up close on dark
   red, "GAME OVER", how long you lasted, and "Press any key". Keys are ignored for
   the first 1.5 seconds, so one held while running does not skip it. A key sends
-  `respawn` and starts again at the start. The line under the fps one says how long
+  `respawn` and starts again at one of two spawn points, the start or the far
+  corner (`Engine.respawn/1`), whichever is farther from the goat. The line under the fps one says how long
   you have been alive.
 - The four LEDs warn you, through walls, before you see it (`lib/omen.ex`): dark
   while the goat is more than seven cells off, a dark red ember crawling across
