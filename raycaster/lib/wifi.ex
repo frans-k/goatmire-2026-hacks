@@ -15,15 +15,19 @@ defmodule Raycaster.Wifi do
     # wait for it.
     caller = self()
 
-    config = [
-      ssid: :erlang.binary_to_list(ssid),
-      psk: :erlang.binary_to_list(psk),
-      dhcp_hostname: ~c"avm-raycaster",
-      sntp: [
-        host: "pool.ntp.org",
-        synchronized: fn time -> send(caller, {:synchronized, time}) end
-      ]
-    ]
+    # An open network has no psk at all, which is not the same as an empty one.
+    psk_option = if psk == "", do: [], else: [psk: :erlang.binary_to_list(psk)]
+
+    config =
+      [ssid: :erlang.binary_to_list(ssid)] ++
+        psk_option ++
+        [
+          dhcp_hostname: ~c"avm-raycaster",
+          sntp: [
+            host: "pool.ntp.org",
+            synchronized: fn time -> send(caller, {:synchronized, time}) end
+          ]
+        ]
 
     case :network.wait_for_sta(config, 30_000) do
       {:ok, {address, _netmask, _gateway}} ->
