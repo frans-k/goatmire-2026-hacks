@@ -82,6 +82,20 @@ defmodule Raycaster.Engine do
 
   def new, do: %{x: 384, y: 384, a: 0}
 
+  # Where a badge comes back after being caught: the start, or the far corner
+  # facing into the map, whichever is farther from the goat (as the crow flies).
+  # Without a goat, the start.
+  @start %{x: 384, y: 384, a: 0}
+  @corner %{x: 13 * 256 + 128, y: 13 * 256 + 128, a: 32_768}
+
+  def respawn({gx, gy, _hunting}) do
+    if apart(@start, gx, gy) >= apart(@corner, gx, gy), do: @start, else: @corner
+  end
+
+  def respawn(_no_goat), do: new()
+
+  defp apart(%{x: x, y: y}, gx, gy), do: (x - gx) * (x - gx) + (y - gy) * (y - gy)
+
   # The map. Call this once and pass the result to step/4 and frame/4.
   def grid, do: @grid
 

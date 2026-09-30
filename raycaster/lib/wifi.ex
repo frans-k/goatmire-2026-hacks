@@ -5,6 +5,41 @@ defmodule Raycaster.Wifi do
 
   @retry_delay_ms 2_000
 
+  @doc """
+  The network to join, as `{ssid, psk}`, or nil for none. Credentials compiled in win.
+  Without them, and when `from_nvs` is set, it is the network the badge already knows:
+  the badge's own firmware keeps what is typed under Settings, Wifi in the `badge` NVS
+  namespace as `wifi_ssid` and `wifi_psk`, and flashing over it leaves NVS alone. A
+  build made this way carries no password.
+  """
+  def credentials(ssid, psk, _from_nvs) when is_binary(ssid), do: {ssid, psk || ""}
+
+  def credentials(_no_ssid, _psk, true) do
+    case nvs(:wifi_ssid) do
+      ssid when is_binary(ssid) and ssid != "" ->
+        case nvs(:wifi_psk) do
+          psk when is_binary(psk) -> {ssid, psk}
+          _open -> {ssid, ""}
+        end
+
+      _none ->
+        nil
+    end
+  end
+
+  def credentials(_no_ssid, _psk, _from_nvs), do: nil
+
+  # AtomVM answers :undefined for a key that is not there. On the laptop there is no NVS at
+  # all, which is the same as nothing stored.
+  defp nvs(key) do
+    case :esp.nvs_get_binary(:badge, key) do
+      :undefined -> nil
+      value -> value
+    end
+  catch
+    _kind, _reason -> nil
+  end
+
   # wait_for_sta/2 returns once the badge has associated and DHCP has given it
   # an address, or with an error when neither happens in time. A single scan
   # can miss the access point, so a failed attempt is retried a few times.
