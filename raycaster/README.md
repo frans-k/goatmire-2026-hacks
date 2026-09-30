@@ -36,6 +36,9 @@ how long the game still had to wait for it before sending the next. Build with
 only the line saying who is playing is on screen. Standing still with no key
 held, nothing is redrawn except those lines, once a second, so it reads 1 fps.
 
+Handing the game to a friend, without a password in the image: see
+[docs/sharing.md](docs/sharing.md).
+
 ## How it works
 
 `lib/engine.ex` is the whole renderer. For each of 40 columns across the screen
