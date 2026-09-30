@@ -33,8 +33,8 @@ Badges are built with `RAYCASTER_RELAY=ws://host:4040` and, if there is a token,
 ## Container
 
 ```sh
-docker build -t goatmire-relay .
-docker run -d --name goatmire-relay -p 4040:4040 -e RELAY_TOKEN=... goatmire-relay
+docker build -t evilgoat-relay .
+docker run -d --name evilgoat-relay -p 4040:4040 -e RELAY_TOKEN=... evilgoat-relay
 ```
 
 The image is about 500 MB because it is `elixir:slim` with the source compiled in,
@@ -58,7 +58,7 @@ world, and Fly's default deploy makes two: hence `--ha=false`. It is never stopp
 either, since a stopped relay is an absent one.
 
 A badge connects to `wss://` about four seconds after it boots, with no wait for its
-clock: tried on a badge on home wifi against `wss://goatmire-relay.fly.dev` with a
+clock: tried on a badge on home wifi against `wss://goatmire-relay.fly.dev` (that app is now `evilgoat-relay`) with a
 token, the driver said `Certificate validated`, the badge took a slot in room 1, and
 three ghosts across the internet were in it with it. The firmware's chat waits for the
 time before it connects, because a certificate is not yet valid at the epoch, and I
