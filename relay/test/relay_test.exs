@@ -138,6 +138,30 @@ defmodule Relay.RelayTest do
     assert slot == 1
   end
 
+  test "the snapshot says where the goat is" do
+    a = connect()
+    join(a)
+
+    assert_receive {:frame, ^a, [nil, nil, @topic, "snap", %{"g" => [x, y, hunting]}]}, 1_000
+    assert x in 0..4_095 and y in 0..4_095 and hunting in [0, 1]
+  end
+
+  test "a badge the goat reaches is told so, is out, and can come back" do
+    a = connect()
+    %{"slot" => slot} = join(a)
+    assert_receive {:frame, ^a, [nil, nil, @topic, "snap", %{"g" => [x, y, _hunting]}]}, 1_000
+
+    Client.push(a, [nil, nil, @topic, "pos", %{"x" => x, "y" => y}])
+    assert_receive {:frame, ^a, [nil, nil, @topic, "caught", %{}]}, 1_000
+    assert snapshot_where(a, &(&1 == [])) == []
+
+    Client.push(a, [nil, nil, @topic, "respawn", %{}])
+    Process.sleep(100)
+    Client.push(a, [nil, nil, @topic, "pos", %{"x" => 384, "y" => 384}])
+
+    assert snapshot_where(a, &(&1 == [[slot, 384, 384]])) == [[slot, 384, 384]]
+  end
+
   test "the heartbeat is answered as Phoenix answers it" do
     a = connect()
     Client.push(a, [nil, "7", "phoenix", "heartbeat", %{}])

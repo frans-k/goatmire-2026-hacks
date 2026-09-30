@@ -19,9 +19,15 @@ defmodule Raycaster do
   and is told where it is. The others are drawn as coloured figures. Without them
   it is a room to walk around in alone, and the game starts at once either way:
   wifi is joined in a process of its own.
+
+  The relay also has an evil goat in every room, which hunts the players. When it
+  catches this badge the relay says so, and the game shows `Raycaster.GameOver`
+  until a key is pressed, then starts again at the beginning. The line under the
+  fps one says how long this life has lasted, and the LEDs how near the goat is,
+  see `Raycaster.Omen`.
   """
 
-  alias Raycaster.{Engine, Keyboard, RelayLink, RelayWire, Screen, Wifi}
+  alias Raycaster.{Engine, GameOver, Keyboard, Omen, RelayLink, RelayWire, Screen, Wifi}
 
   # Read while compiling on the laptop: the badge never sees Application at all.
   @ssid Application.compile_env!(:raycaster, [:wifi, :ssid])
@@ -34,11 +40,23 @@ defmodule Raycaster do
   # Turns on the spot by itself, for measuring, see config/config.exs.
   @autopilot Application.compile_env!(:raycaster, :autopilot)
 
+  # The fps line on screen as well as on the monitor, see config/config.exs.
+  @stats Application.compile_env!(:raycaster, :stats)
+
+  # A goat standing still, to look at, see config/config.exs.
+  @goat Application.compile_env!(:raycaster, :goat)
+
   @report_ms 1000
 
   # How often to say where we are. The relay hands out one snapshot a second and
-  # forgets a badge that is quiet for five seconds, so this is all it needs.
-  @announce_ms 1_000
+  # forgets a badge that is quiet for five seconds, but its goat judges a catch on
+  # the last position it heard, so twice a second keeps that fairer. Sending is
+  # not what costs a badge ten milliseconds a message; taking one in is.
+  @announce_ms 500
+
+  # How long the game over screen stays whatever is pressed, so a key held while
+  # running from the goat does not skip it.
+  @over_ms 1_500
 
   def start do
     {:ok, scene, display} = Screen.start()
@@ -55,10 +73,21 @@ defmodule Raycaster do
     id = hex(chip_id())
     IO.puts("raycaster: badge #{id}")
 
-    net = %{link: nil, up: false, others: [], sent: nil}
-    if @ssid != nil and @relay != nil, do: go_online(self(), id)
-
     now = now()
+
+    net = %{
+      link: nil,
+      up: false,
+      others: [],
+      goat: nil,
+      caught: false,
+      alive_at: now,
+      sent: nil,
+      omen: Omen.start_link(),
+      dread: 0
+    }
+
+    if @ssid != nil and @relay != nil, do: go_online(self(), id)
 
     stats = %{
       at: now,
@@ -69,6 +98,7 @@ defmodule Raycaster do
       hud: "",
       drawn: nil,
       others: nil,
+      goat: nil,
       showing: false
     }
 
@@ -140,12 +170,16 @@ defmodule Raycaster do
   defp digit(n) when n < 10, do: ?0 + n
   defp digit(n), do: ?A + n - 10
 
+  defp loop(presenter, grid, _player, _held, _last, stats, %{caught: true} = net),
+    do: game_over(presenter, grid, stats, net)
+
   defp loop(presenter, grid, player, held, last, stats, net) do
     {held, net} = drain(held, net)
     held = if @autopilot, do: ["Right"], else: held
 
     {held, last, net} =
-      if held == [] and player == stats.drawn and net.others == stats.others do
+      if held == [] and player == stats.drawn and net.others == stats.others and
+           net.goat == stats.goat and not net.caught do
         idle(stats.at + @report_ms - now(), net)
       else
         {held, last, net}
@@ -153,9 +187,10 @@ defmodule Raycaster do
 
     t0 = now()
     player = Engine.step(grid, player, held, t0 - last)
-    net = announce(net, player, t0)
+    net = announce(net, player, t0) |> dread(player)
 
-    items = Engine.sprites(grid, player, net.others, Screen.width(), Screen.height())
+    others = goat(net.goat, net.others)
+    items = Engine.sprites(grid, player, others, Screen.width(), Screen.height())
     items = items ++ Engine.frame(grid, player, Screen.width(), Screen.height())
     t1 = now()
 
@@ -163,7 +198,7 @@ defmodule Raycaster do
     # still going out.
     draw = shown(stats.showing)
     t2 = now()
-    send(presenter, {:frame, self(), [hud(stats.hud), status(net) | items]})
+    send(presenter, {:frame, self(), overlay(stats, net, items)})
 
     stats = %{
       stats
@@ -173,10 +208,69 @@ defmodule Raycaster do
         draw: stats.draw + draw,
         drawn: player,
         others: net.others,
+        goat: net.goat,
         showing: true
     }
 
     loop(presenter, grid, player, held, t0, report(stats, t2, length(items)), net)
+  end
+
+  # The relay's goat goes in with the others; the switch in config/config.exs
+  # stands one still at the end of the first corridor instead, to look at.
+  defp goat(goat, others) do
+    case the_goat(goat) do
+      nil -> others
+      {x, y, hunting} -> [{:goat, x, y, hunting} | others]
+    end
+  end
+
+  if @goat do
+    defp the_goat(_goat), do: {10 * 256 + 128, 384, true}
+  else
+    defp the_goat(goat), do: goat
+  end
+
+  # Tells the LEDs how near the goat is, only when that has changed.
+  defp dread(net, player), do: feel(net, Omen.level(player, the_goat(net.goat)))
+
+  defp feel(%{dread: level} = net, level), do: net
+
+  defp feel(net, level) do
+    Omen.set(net.omen, level)
+    %{net | dread: level}
+  end
+
+  # Caught: the last frame goes out, then the game over screen, which stays until
+  # a key is pressed. Then the relay is told this badge is back, and it starts
+  # again where every badge starts, as if new.
+  defp game_over(presenter, grid, stats, net) do
+    survived = div(now() - net.alive_at, 1000)
+    IO.puts("raycaster: caught by the goat after #{survived} s")
+
+    shown(stats.showing)
+    items = GameOver.items(grid, survived, Screen.width(), Screen.height())
+    send(presenter, {:frame, self(), items})
+    shown(true)
+
+    net = await_key(now() + @over_ms, feel(%{net | caught: false}, :caught))
+    if net.link != nil, do: RelayLink.respawn(net.link)
+
+    now = now()
+    stats = %{stats | at: now, frames: 0, ray: 0, wait: 0, draw: 0, drawn: nil, showing: false}
+    loop(presenter, grid, Engine.new(), [], now, stats, %{net | alive_at: now, sent: nil})
+  end
+
+  # The first key pressed from `from` on. Whatever the relay says meanwhile is
+  # still taken in, so the game carries on from what is true now.
+  defp await_key(from, net) do
+    receive do
+      {:key, :down, _label} -> if now() >= from, do: net, else: await_key(from, net)
+      {:key, :up, _label} -> await_key(from, net)
+      {:link_pid, _link} = message -> await_key(from, heard(message, net))
+      {:link, _status} = message -> await_key(from, heard(message, net))
+      {:players, _list, _goat} = message -> await_key(from, heard(message, net))
+      :caught -> await_key(from, net)
+    end
   end
 
   # Says where we are, when it is time.
@@ -191,7 +285,11 @@ defmodule Raycaster do
 
   defp announce(net, _player, _now), do: net
 
-  defp status(%{up: true, others: others}), do: line("online, #{length(others) + 1} playing")
+  defp status(%{up: true, others: others, goat: nil}),
+    do: line("online, #{length(others) + 1} playing")
+
+  defp status(%{up: true, others: others} = net),
+    do: line("online, #{length(others) + 1} playing, alive #{div(now() - net.alive_at, 1000)} s")
 
   defp status(%{link: nil}) do
     cond do
@@ -203,7 +301,16 @@ defmodule Raycaster do
 
   defp status(_net), do: line("connecting")
 
-  defp line(text), do: {:text, 4, 24, :default16px, 0x00FF00, 0x000000, text}
+  # The fps line on top, when it is built in, and who is playing under it, or at
+  # the top on its own.
+  if @stats do
+    defp overlay(stats, net, items), do: [hud(stats.hud), status(net) | items]
+    defp hud(text), do: {:text, 4, 4, :default16px, 0xFFFF00, 0x000000, text}
+    defp line(text), do: {:text, 4, 24, :default16px, 0x00FF00, 0x000000, text}
+  else
+    defp overlay(_stats, net, items), do: [status(net) | items]
+    defp line(text), do: {:text, 4, 4, :default16px, 0x00FF00, 0x000000, text}
+  end
 
   # How long the last frame took from being handed over to being on the panel.
   defp shown(false), do: 0
@@ -236,7 +343,8 @@ defmodule Raycaster do
       {:key, :up, _label} -> idle(timeout, net)
       {:link_pid, _link} = message -> {[], now(), heard(message, net)}
       {:link, _status} = message -> {[], now(), heard(message, net)}
-      {:players, _list} = message -> {[], now(), heard(message, net)}
+      {:players, _list, _goat} = message -> {[], now(), heard(message, net)}
+      :caught -> {[], now(), heard(:caught, net)}
     after
       max(timeout, 0) -> {[], now(), net}
     end
@@ -251,7 +359,8 @@ defmodule Raycaster do
       {:key, :up, label} -> drain(:lists.delete(label, held), net)
       {:link_pid, _link} = message -> drain(held, heard(message, net))
       {:link, _status} = message -> drain(held, heard(message, net))
-      {:players, _list} = message -> drain(held, heard(message, net))
+      {:players, _list, _goat} = message -> drain(held, heard(message, net))
+      :caught -> drain(held, heard(:caught, net))
     after
       0 -> {held, net}
     end
@@ -259,11 +368,13 @@ defmodule Raycaster do
 
   defp heard({:link_pid, link}, net), do: %{net | link: link}
   defp heard({:link, :up}, net), do: %{net | up: true, sent: nil}
-  defp heard({:link, :down}, net), do: %{net | up: false, others: []}
+  defp heard({:link, :down}, net), do: %{net | up: false, others: [], goat: nil}
 
   # The relay's snapshot is everyone else in the room, ready to draw: a slot is a
-  # colour, and there is nothing to carry along and nothing to expire.
-  defp heard({:players, players}, net), do: %{net | others: figures(players)}
+  # colour, and there is nothing to carry along and nothing to expire. The goat
+  # jumps from one to the next like everyone else.
+  defp heard({:players, players, goat}, net), do: %{net | others: figures(players), goat: goat}
+  defp heard(:caught, net), do: %{net | caught: true}
 
   defp report(%{frames: frames} = stats, now, rects) when now - stats.at >= @report_ms do
     # Rounded, so that standing still (one frame in a little over a second)
@@ -284,8 +395,6 @@ defmodule Raycaster do
   defp report(stats, _now, _rects), do: stats
 
   defp tenths(n), do: "#{div(n, 10)}.#{rem(n, 10)}"
-
-  defp hud(text), do: {:text, 4, 4, :default16px, 0xFFFF00, 0x000000, text}
 
   defp now, do: :erlang.monotonic_time(:millisecond)
 end

@@ -5,8 +5,9 @@ defmodule Raycaster.RelayWire do
 
     * to join: `phx_join` on `raycaster:lobby`; the answer says which room and slot
     * to say where it stands: `pos`, `{"x": .., "y": ..}`; no answer
-    * every tick the server sends `snap`, `{"p": [[slot, x, y], ...]}`: everyone in
-      the room, this badge too, by slot
+    * every tick the server sends `snap`, `{"p": [[slot, x, y], ...], "g": [x, y,
+      hunting]}`: everyone in the room, this badge too, by slot, and the goat
+    * `caught` when the goat has caught this badge, and `respawn` back to come back
     * `heartbeat` on `phoenix` now and then, or Phoenix drops a quiet connection
 
   Pure: `Raycaster.RelayLink` owns the socket. Nothing here trusts the server more
@@ -48,26 +49,39 @@ defmodule Raycaster.RelayWire do
   @spec pos(binary, binary, integer, integer) :: binary
   def pos(join_ref, ref, x, y), do: frame(join_ref, ref, @topic, "pos", %{"x" => x, "y" => y})
 
+  @spec respawn(binary, binary) :: binary
+  def respawn(join_ref, ref), do: frame(join_ref, ref, @topic, "respawn", %{})
+
   @spec heartbeat() :: binary
   def heartbeat, do: frame(nil, "0", "phoenix", "heartbeat", %{})
 
   @doc """
   Reads a frame from the server, given this badge's own slot (or nil before it has
-  one): `{:joined, room, slot, max}`, `{:players, [{slot, x, y}]}` without this
-  badge in it, or `:ignore`.
+  one): `{:joined, room, slot, max}`, `{:players, [{slot, x, y}], goat}` without
+  this badge in it, where the goat is `{x, y, hunting}` or nil from a server
+  without one, `:caught`, or `:ignore`.
   """
   @spec decode(binary, integer | nil) ::
           {:joined, integer, integer, integer}
-          | {:players, [{integer, integer, integer}]}
+          | {:players, [{integer, integer, integer}], {integer, integer, boolean} | nil}
+          | :caught
           | :ignore
   def decode(text, own_slot) do
     case json(text) do
       {:ok, [_join_ref, _ref, @topic, "phx_reply", %{"status" => "ok", "response" => response}]} ->
         joined(response)
 
-      {:ok, [_join_ref, _ref, @topic, "snap", %{"p" => players}]}
+      {:ok, [_join_ref, _ref, @topic, "snap", %{"p" => players} = snap]}
       when is_list(players) and length(players) <= @room_max ->
-        players(players, own_slot, [])
+        with {:players, players} <- players(players, own_slot, []),
+             {:ok, goat} <- goat(:maps.get("g", snap, nil)) do
+          {:players, players, goat}
+        else
+          _odd -> :ignore
+        end
+
+      {:ok, [_join_ref, _ref, @topic, "caught", _payload]} ->
+        :caught
 
       _other ->
         :ignore
@@ -89,6 +103,16 @@ defmodule Raycaster.RelayWire do
   end
 
   defp players(_odd, _own, _acc), do: :ignore
+
+  defp goat(nil), do: {:ok, nil}
+  defp goat(:null), do: {:ok, nil}
+
+  defp goat([x, y, hunting])
+       when is_integer(x) and is_integer(y) and x >= 0 and x < @limit and y >= 0 and y < @limit and
+              hunting in [0, 1],
+       do: {:ok, {x, y, hunting == 1}}
+
+  defp goat(_odd), do: :error
 
   defp frame(join_ref, ref, topic, event, payload) do
     :erlang.iolist_to_binary(:json.encode([null(join_ref), null(ref), topic, event, payload]))

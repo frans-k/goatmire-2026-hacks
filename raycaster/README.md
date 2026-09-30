@@ -31,9 +31,10 @@ The monitor prints, once a second:
 
 `ray` is time spent casting rays and building the display list. The display
 takes each frame in a process of its own while the next is cast, and `wait` is
-how long the game still had to wait for it before sending the next. The same
-line is drawn in the top corner. Standing still with no key held, nothing is
-redrawn except that line, once a second, so it reads 1 fps.
+how long the game still had to wait for it before sending the next. Build with
+`RAYCASTER_STATS=1` and the same line is drawn in the top corner too; without it
+only the line saying who is playing is on screen. Standing still with no key
+held, nothing is redrawn except those lines, once a second, so it reads 1 fps.
 
 ## How it works
 
@@ -341,13 +342,57 @@ Next:
 
 **Gameplay**
 
-- There is only a room to walk around in: no goal, enemies or shooting, and the
-  walls are flat colours, not textures.
-- One map, hard-coded in `lib/engine.ex`. Loading maps, or letting Claude
-  generate them, would need the map to come from outside the module.
-- The fps line in the corner is a permanent debug readout. Make it a toggle.
+- Alone, there is only a room to walk around in: no goal, enemies or shooting. With
+  the relay there is the evil goat below. The walls are flat colours, not textures.
+- One map, `../relay/priv/map.txt`, built into `lib/engine.ex` while compiling.
+  Loading maps at run time, or letting Claude generate them, would need the badge
+  to get the map from outside the module, and the relay's goat to walk it too.
 - Make it a mode of the chat badge (`../chat`), switched by a key, instead of a
   separate firmware.
+
+**Evil goat**
+
+Done on the laptop, not tried on a badge yet: a goat on the relay that hunts the
+players in a room, and a game over screen for whoever it catches. How it moves is in
+`../relay/README.md`. On the badge:
+
+- The map is `../relay/priv/map.txt`, read while compiling, so the relay's goat walks
+  the same walls. The tour frames prove it is the map it was.
+- `Engine.sprites` takes `{:goat, x, y, hunting}` beside the players and draws a goat
+  facing you: body, head, ears, curling horns, beard, legs, and eyes that are yellow,
+  and red while it hunts or searches. It is thirteen rectangles near and five far
+  off, and hides behind walls like anyone.
+- `RelayWire` reads the goat from the snapshot and `caught`, and refuses a snapshot
+  with an odd goat in it, as it does one with an odd player.
+- On `caught` the game draws `Raycaster.GameOver` once: the goat up close on dark
+  red, "GAME OVER", how long you lasted, and "Press any key". Keys are ignored for
+  the first 1.5 seconds, so one held while running does not skip it. A key sends
+  `respawn` and starts again at the start. The line under the fps one says how long
+  you have been alive.
+- The four LEDs warn you, through walls, before you see it (`lib/omen.ex`): dark
+  while the goat is more than seven cells off, a dark red ember crawling across
+  them within seven, red, purple and orange shifting round within four, a red and
+  white strobe within two while it hunts, and steady red under the game over
+  screen. A process of its own plays the pattern from frames encoded once, and the
+  game only tells it when the level changes. The driver is the chat badge's
+  (`lib/sk6812.ex`), on `spi3`, beside the display's `spi2`. Not yet seen on a
+  badge.
+- The badge says where it is twice a second instead of once, so the goat judges a
+  catch on a fresher position. What that costs the badge is not measured.
+- A badge now comes back by itself when the relay restarts. The websocket driver
+  says it reconnects on its own, but after the server closed the connection it
+  said `closed :normal` twice and never tried again, and a position sent while it
+  was down came back as a bare `:not_connected`, which crashed the link. So on a
+  close `RelayLink` closes it too and opens a new one three seconds later, and any
+  refusal to send is only logged. Tried on a badge with the relay stopped for five
+  seconds: it was back in its room about four seconds after the relay was.
+- Build with `RAYCASTER_GOAT=1` and a goat stands hunting at the end of the corridor
+  ahead of where you start, to look at without a relay.
+
+Left to do: try it on a badge; measure what the goat costs in fps (autopilot, as
+above) and what sending twice a second costs; tune speeds and the catch radius by
+playing. Later: a goat that speeds up the longer you last, more goats in bigger
+rooms, a goat of your own offline, and moving the goat smoothly between snapshots.
 
 **Not verified**
 
@@ -370,3 +415,5 @@ Next:
 
 `lib/keyboard.ex` and `lib/keymap.ex` are adapted from the workshop's keyboard
 exercise, which reads the badge's 6x13 key matrix with interrupts.
+`lib/sk6812.ex` is adapted from `../chat/lib/sk6812.ex`, which drives the LEDs with
+the SPI peripheral as a waveform generator.

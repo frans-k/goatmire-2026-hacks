@@ -15,6 +15,11 @@ defmodule Raycaster.RelayWireTest do
                ["1", "5", "raycaster:lobby", "pos", %{"x" => 300, "y" => 400}]
     end
 
+    test "respawn says the badge is back, and nothing more" do
+      assert decode_json(RelayWire.respawn("1", "6")) ==
+               ["1", "6", "raycaster:lobby", "respawn", %{}]
+    end
+
     test "the heartbeat has no join ref, and the phoenix topic" do
       assert decode_json(RelayWire.heartbeat()) == [:null, "0", "phoenix", "heartbeat", %{}]
     end
@@ -64,15 +69,37 @@ defmodule Raycaster.RelayWireTest do
 
     test "a snapshot is everyone else in the room, by slot" do
       assert RelayWire.decode(snap("[[1,10,20],[2,30,40],[3,50,60]]"), 2) ==
-               {:players, [{1, 10, 20}, {3, 50, 60}]}
+               {:players, [{1, 10, 20}, {3, 50, 60}], nil}
     end
 
     test "before a badge has a slot every player is someone else" do
-      assert RelayWire.decode(snap("[[1,10,20]]"), nil) == {:players, [{1, 10, 20}]}
+      assert RelayWire.decode(snap("[[1,10,20]]"), nil) == {:players, [{1, 10, 20}], nil}
+    end
+
+    test "the goat comes with the snapshot, hunting or not" do
+      goat = fn g -> ~s([null,null,"raycaster:lobby","snap",{"p":[[1,10,20]],"g":#{g}}]) end
+
+      assert RelayWire.decode(goat.("[3712,3712,0]"), 2) ==
+               {:players, [{1, 10, 20}], {3712, 3712, false}}
+
+      assert RelayWire.decode(goat.("[100,200,1]"), 2) == {:players, [{1, 10, 20}], {100, 200, true}}
+      assert RelayWire.decode(goat.("null"), 2) == {:players, [{1, 10, 20}], nil}
+    end
+
+    test "a goat that makes no sense spoils the snapshot" do
+      goat = fn g -> ~s([null,null,"raycaster:lobby","snap",{"p":[],"g":#{g}}]) end
+
+      for bad <- ["[1,2]", "[5000,1,0]", "[1,2,3]", ~s(["a",2,0]), "7"] do
+        assert RelayWire.decode(goat.(bad), 1) == :ignore
+      end
+    end
+
+    test "being caught is caught" do
+      assert RelayWire.decode(~s([null,null,"raycaster:lobby","caught",{}]), 1) == :caught
     end
 
     test "an empty room is an empty list, not an error" do
-      assert RelayWire.decode(snap("[]"), 1) == {:players, []}
+      assert RelayWire.decode(snap("[]"), 1) == {:players, [], nil}
     end
 
     test "a snapshot with anything odd in it is refused whole" do
