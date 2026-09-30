@@ -8,6 +8,7 @@ defmodule Relay.Application do
     port = Application.get_env(:relay, :port, 4040)
 
     children = [
+      Relay.Stats,
       Relay.Hub,
       {Bandit, plug: Relay.Router, port: port, ip: {0, 0, 0, 0}}
     ]

@@ -32,6 +32,8 @@ defmodule Raycaster do
   # Read while compiling on the laptop: the badge never sees Application at all.
   @ssid Application.compile_env!(:raycaster, [:wifi, :ssid])
   @psk Application.compile_env!(:raycaster, [:wifi, :psk])
+  # Take the network from the badge's NVS when none is compiled in, see config/config.exs.
+  @nvs_wifi Application.compile_env!(:raycaster, :nvs_wifi)
 
   # The relay server, and its token if it asks for one, see config/config.exs.
   @relay Application.compile_env!(:raycaster, :relay)
@@ -84,10 +86,11 @@ defmodule Raycaster do
       alive_at: now,
       sent: nil,
       omen: Omen.start_link(),
-      dread: 0
+      dread: 0,
+      wifi: Wifi.credentials(@ssid, @psk, @nvs_wifi)
     }
 
-    if @ssid != nil and @relay != nil, do: go_online(self(), id)
+    if net.wifi != nil and @relay != nil, do: go_online(self(), id, net.wifi)
 
     stats = %{
       at: now,
@@ -110,12 +113,12 @@ defmodule Raycaster do
   # trapping exits: the network is optional, so nothing that goes wrong in it may
   # take the game down, only be said. The link is started here, so it lives as
   # long as this process.
-  defp go_online(game, id) do
+  defp go_online(game, id, {ssid, psk}) do
     spawn(fn ->
       Process.flag(:trap_exit, true)
-      IO.puts("Connecting to #{@ssid}...")
+      IO.puts("Connecting to #{ssid}...")
 
-      case Wifi.connect(@ssid, @psk) do
+      case Wifi.connect(ssid, psk) do
         {:ok, address} ->
           IO.puts("Wifi up, #{address}")
           start_link(game, id)
@@ -242,7 +245,7 @@ defmodule Raycaster do
 
   # Caught: the last frame goes out, then the game over screen, which stays until
   # a key is pressed. Then the relay is told this badge is back, and it starts
-  # again at whichever spawn point is farther from the goat.
+  # again at the start or the far corner, whichever is farther from the goat.
   defp game_over(presenter, grid, stats, net) do
     survived = div(now() - net.alive_at, 1000)
     IO.puts("raycaster: caught by the goat after #{survived} s")
@@ -296,10 +299,10 @@ defmodule Raycaster do
   defp status(%{up: true, others: others} = net),
     do: line("online, #{length(others) + 1} playing, alive #{div(now() - net.alive_at, 1000)} s")
 
-  defp status(%{link: nil}) do
+  defp status(%{link: nil} = net) do
     cond do
       @relay == nil -> line("offline")
-      @ssid == nil -> line("offline")
+      net.wifi == nil -> line("offline")
       true -> line("joining wifi")
     end
   end

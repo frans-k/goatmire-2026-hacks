@@ -4,7 +4,7 @@
 #   docker run -d --name evilgoat-relay -p 4040:4040 -e RELAY_TOKEN=... evilgoat-relay
 #
 # RELAY_TOKEN (optional) is a shared token badges must send; RELAY_MAX is the most
-# connections at once (200); PORT is the port inside the container (4040).
+# connections at once (300); PORT is the port inside the container (4040).
 FROM elixir:1.19-slim
 
 ENV MIX_ENV=prod

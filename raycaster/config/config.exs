@@ -12,6 +12,17 @@ if File.exists?(Path.join(__DIR__, "config_local.exs")) do
   import_config("config_local.exs")
 end
 
+# RAYCASTER_WIFI_FROM_NVS=1 leaves every compiled-in network out, config_local.exs too, and
+# joins the one the badge's own firmware saved under Settings, Wifi. One build then works on
+# any badge and carries no password, so the image can be handed round.
+nvs_wifi = System.get_env("RAYCASTER_WIFI_FROM_NVS") == "1"
+
+if nvs_wifi do
+  config :raycaster, :wifi, ssid: nil, psk: nil
+end
+
+config :raycaster, :nvs_wifi, nvs_wifi and System.get_env("RAYCASTER_OFFLINE") != "1"
+
 # The relay server (see relay/) badges play through: RAYCASTER_RELAY=wss://host or
 # ws://host:4040, read while compiling. It puts badges in rooms of eight by itself
 # and tells each one who is where once a second. Without it the game is solo.

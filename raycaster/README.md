@@ -36,6 +36,9 @@ how long the game still had to wait for it before sending the next. Build with
 only the line saying who is playing is on screen. Standing still with no key
 held, nothing is redrawn except those lines, once a second, so it reads 1 fps.
 
+Handing the game to a friend, without a password in the image: see
+[docs/sharing.md](docs/sharing.md).
+
 ## How it works
 
 `lib/engine.ex` is the whole renderer. For each of 40 columns across the screen
@@ -368,8 +371,8 @@ players in a room, and a game over screen for whoever it catches. How it moves i
   red, "GAME OVER", how long you lasted, and "Press any key". Keys are ignored for
   the first 1.5 seconds, so one held while running does not skip it. A key sends
   `respawn` and starts again at one of two spawn points, the start or the far
-  corner (`Engine.respawn/1`), whichever is farther from the goat. The line under the fps one says how long
-  you have been alive.
+  corner (`Engine.respawn/1`), whichever is farther from the goat. The line under
+  the fps one says how long you have been alive.
 - The four LEDs warn you, through walls, before you see it (`lib/omen.ex`): dark
   while the goat is more than seven cells off, a dark red ember crawling across
   them within seven, red, purple and orange shifting round within four, a red and

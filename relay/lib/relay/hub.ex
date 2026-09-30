@@ -20,6 +20,7 @@ defmodule Relay.Hub do
   use GenServer
 
   alias Relay.Rooms
+  alias Relay.Stats
 
   @topic "raycaster:lobby"
 
@@ -30,7 +31,7 @@ defmodule Relay.Hub do
 
   @doc """
   Puts `pid` in a room. Returns `{room, slot, max}`, or `{:error, :full}` when the
-  server already holds as many players as `:max_players` allows (200).
+  server already holds as many players as `:max_players` allows (300).
   """
   def join(pid), do: GenServer.call(__MODULE__, {:join, pid})
 
@@ -66,13 +67,14 @@ defmodule Relay.Hub do
 
   @impl true
   def handle_call({:join, pid}, _from, state) do
-    cap = Application.get_env(:relay, :max_players, 200)
+    cap = Application.get_env(:relay, :max_players, 300)
 
     if Rooms.count(state.rooms) >= cap and not Rooms.member?(state.rooms, pid) do
       {:reply, {:error, :full}, state}
     else
       {rooms, {room, slot}} = Rooms.join(state.rooms, pid)
       monitors = Map.put_new_lazy(state.monitors, pid, fn -> Process.monitor(pid) end)
+      Stats.count(Rooms.count(rooms))
 
       {:reply, {room, slot, state.max}, %{state | rooms: rooms, monitors: monitors}}
     end

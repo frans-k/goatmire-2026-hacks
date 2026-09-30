@@ -6,6 +6,9 @@ defmodule Relay.Router do
 
   use Plug.Router
 
+  @dashboard File.read!(Path.expand("../../priv/dashboard.html", __DIR__))
+  @external_resource Path.expand("../../priv/dashboard.html", __DIR__)
+
   plug(:match)
   plug(:dispatch)
 
@@ -23,12 +26,38 @@ defmodule Relay.Router do
 
       true ->
         conn
-        |> WebSockAdapter.upgrade(Relay.Socket, [], timeout: 60_000)
+        |> WebSockAdapter.upgrade(Relay.Socket, [chip: conn.params["chip"]], timeout: 60_000)
         |> halt()
     end
   end
 
+  # The page people look at; it asks for /stats.json now and then. Counts only.
   get "/" do
+    conn
+    |> put_resp_content_type("text/html")
+    |> put_resp_header(
+      "content-security-policy",
+      "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'"
+    )
+    |> send_resp(200, @dashboard)
+  end
+
+  get "/stats.json" do
+    rooms = Relay.Hub.counts()
+    now = rooms |> Enum.map(fn {_room, n} -> n end) |> Enum.sum()
+
+    body =
+      Relay.Stats.snapshot()
+      |> Map.merge(%{"now" => now, "rooms" => length(rooms)})
+      |> JSON.encode!()
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> put_resp_header("cache-control", "no-store")
+    |> send_resp(200, body)
+  end
+
+  get "/status" do
     rooms = Relay.Hub.counts()
     total = rooms |> Enum.map(fn {_room, n} -> n end) |> Enum.sum()
 
