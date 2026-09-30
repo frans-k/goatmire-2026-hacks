@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Players online</title>
+<style>
+  :root { --bg: #fafaf7; --fg: #1d1d1b; --muted: #6b6b66; --bar: #3a7d5c; --peak: #c9a227; --line: #dcdcd5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16171a; --fg: #ececea; --muted: #8e8e88; --bar: #5fb287; --peak: #d9b84a; --line: #2c2d31; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
+         font: 16px/1.4 system-ui, sans-serif; }
+  main { max-width: 34rem; margin: 0 auto; }
+  h1 { font-size: 1rem; font-weight: 600; color: var(--muted); margin: 0 0 4px; }
+  .now { font-size: 4.5rem; font-weight: 700; line-height: 1; }
+  .sub { color: var(--muted); margin: 4px 0 28px; }
+  h2 { font-size: 1rem; margin: 0 0 8px; }
+  .row { display: grid; grid-template-columns: 5.5rem 1fr; gap: 12px; align-items: center;
+         padding: 6px 0; border-top: 1px solid var(--line); }
+  .day { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bars { display: grid; gap: 3px; }
+  .bar { height: 10px; border-radius: 2px; background: var(--bar); min-width: 2px; }
+  .bar.peak { background: var(--peak); height: 6px; }
+  .nums { font-variant-numeric: tabular-nums; font-size: .9rem; }
+  .legend { display: flex; gap: 16px; color: var(--muted); font-size: .85rem; margin: 0 0 8px; }
+  .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  #status { color: var(--muted); font-size: .85rem; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Playing now</h1>
+  <div class="now" id="now">–</div>
+  <div class="sub" id="rooms">&nbsp;</div>
+
+  <h2>By day</h2>
+  <div class="legend">
+    <span><span class="key" style="background: var(--bar)"></span>different badges</span>
+    <span><span class="key" style="background: var(--peak)"></span>most at once</span>
+  </div>
+  <div id="days"></div>
+
+  <div id="status">Loading…</div>
+</main>
+<script>
+  var el = function (id) { return document.getElementById(id); };
+
+  function make(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function render(data) {
+    el("now").textContent = data.now;
+    el("rooms").textContent = data.now === 0 ? "nobody right now" :
+      (data.rooms === 1 ? "in 1 room" : "in " + data.rooms + " rooms");
+
+    var days = data.days.slice().reverse();
+    var most = Math.max.apply(null, [1].concat(days.map(function (d) { return Math.max(d.unique, d.peak); })));
+    var box = el("days");
+    box.textContent = "";
+
+    if (days.length === 0) {
+      box.appendChild(make("div", "sub", "No players counted yet."));
+    }
+
+    days.forEach(function (d) {
+      var row = make("div", "row");
+      var label = make("div", "day", d.day === data.today ? "today" : d.day.slice(5));
+      var side = make("div");
+      var bars = make("div", "bars");
+      var unique = make("div", "bar");
+      unique.style.width = (d.unique / most * 100) + "%";
+      var peak = make("div", "bar peak");
+      peak.style.width = (d.peak / most * 100) + "%";
+      bars.appendChild(unique);
+      bars.appendChild(peak);
+      side.appendChild(bars);
+      side.appendChild(make("div", "nums", d.unique + " badges, most at once " + d.peak));
+      row.appendChild(label);
+      row.appendChild(side);
+      box.appendChild(row);
+    });
+
+    el("status").textContent = "Updated " + new Date().toLocaleTimeString() +
+      (data.persistent ? "" : " · counts are kept in memory only and reset when the server restarts");
+  }
+
+  function load() {
+    fetch("/stats.json", { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(render)
+      .catch(function () { el("status").textContent = "Could not reach the server."; });
+  }
+
+  load();
+  setInterval(load, 10000);
+</script>
+</body>
+</html>

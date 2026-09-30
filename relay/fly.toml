@@ -16,6 +16,15 @@ primary_region = "arn"
 [env]
   PORT = "8080"
   RELAY_MAX = "300"
+  # Where the player counts are kept: on the volume below, so a restart or a deploy keeps them.
+  STATS_PATH = "/data/players.log"
+
+# A machine's own disk is wiped on every restart and deploy; a volume is not. One volume goes with
+# one machine, in its region. The first `fly deploy` creates it; snapshots are daily, kept 5 days.
+[mounts]
+  source = "relay_data"
+  destination = "/data"
+  initial_size = "1gb"
 
 [http_service]
   internal_port = 8080

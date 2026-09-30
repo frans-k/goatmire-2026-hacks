@@ -26,9 +26,19 @@ Environment variables, read when it starts:
 | `PORT` | the port badges connect to, 4040 |
 | `RELAY_TOKEN` | a token a badge must send as `?token=...`, or anyone may join |
 | `RELAY_MAX` | the most connections at once, in all rooms, 300 |
+| `STATS_PATH` | the file the player counts are kept in, on a volume so a restart keeps them; without it they are counted in memory only |
+| `STATS_UTC_OFFSET_HOURS` | where a day starts, from UTC, 2 |
 
 Badges are built with `RAYCASTER_RELAY=ws://host:4040` and, if there is a token,
 `RAYCASTER_RELAY_TOKEN=...` (letters, digits and `-_.~`). See `../raycaster`.
+
+## The player dashboard
+
+`GET /` is a page anyone can open: how many are playing now, and by day how many different badges played and the most at once. It asks `GET /stats.json` every ten seconds, which has the same numbers for anything else that wants them, and `GET /status` is the old one-line text. It shows counts, never ids.
+
+The counts are kept in `STATS_PATH`, one line for each new badge in a day (`U 2026-10-01 A0F262EE6F6C`) and each new most-at-once (`P 2026-10-01 37`), and read back when the server starts. **The file holds chip ids**, which derive from a badge's MAC address, so it and the volume's snapshots are not for sharing; the dashboard and `stats.json` do not show them. Only twelve hex digits count as a badge, so test scripts with other names are left out. The id is what the badge says it is: it is a count of badges that claim to be different.
+
+A machine's own disk is wiped on every restart and deploy, so on Fly the file lives on a volume (`[mounts]` in `fly.toml`, created by the first `fly deploy`, 1 GB, about $0.15 a month). One volume goes with one machine and one region, and it is tied to that server: Fly takes a snapshot every day and keeps it 5 days, so losing the server loses up to a day. Without `STATS_PATH`, or if its folder is missing, the dashboard says the counts are in memory only.
 
 ## Container
 
