@@ -261,7 +261,7 @@ defmodule Raycaster do
     now = now()
     stats = %{stats | at: now, frames: 0, ray: 0, wait: 0, draw: 0, drawn: nil, showing: false}
 
-    loop(presenter, grid, Engine.respawn(net.goat), [], now, stats, %{
+    loop(presenter, grid, Engine.respawn(the_goat(net.goat)), [], now, stats, %{
       net
       | alive_at: now,
         sent: nil
