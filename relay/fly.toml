@@ -16,6 +16,9 @@ primary_region = "arn"
 [env]
   PORT = "8080"
   RELAY_MAX = "300"
+  # Players that are not badges, so that someone trying the game alone finds company and a goat
+  # with something to do. They are left out of the counts on the dashboard.
+  GHOSTS = "2"
   # Where the player counts are kept: on the volume below, so a restart or a deploy keeps them.
   STATS_PATH = "/data/players.log"
 

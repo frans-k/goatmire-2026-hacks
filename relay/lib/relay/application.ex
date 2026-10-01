@@ -7,11 +7,12 @@ defmodule Relay.Application do
   def start(_type, _args) do
     port = Application.get_env(:relay, :port, 4040)
 
-    children = [
-      Relay.Stats,
-      Relay.Hub,
-      {Bandit, plug: Relay.Router, port: port, ip: {0, 0, 0, 0}}
-    ]
+    ghosts = Application.get_env(:relay, :ghosts, 0)
+
+    children =
+      [Relay.Stats, Relay.Hub] ++
+        if(ghosts > 0, do: [{Relay.Ghosts, ghosts}], else: []) ++
+        [{Bandit, plug: Relay.Router, port: port, ip: {0, 0, 0, 0}}]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Relay.Supervisor)
   end

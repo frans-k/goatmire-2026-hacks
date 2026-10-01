@@ -32,8 +32,15 @@ defmodule Relay.Hub do
   @doc """
   Puts `pid` in a room. Returns `{room, slot, max}`, or `{:error, :full}` when the
   server already holds as many players as `:max_players` allows (300).
+
+  `ghost: true` is for a player that is not a badge, see `Relay.Ghost`: it is in the room
+  like any other, but the counts of who is playing leave it out.
   """
-  def join(pid), do: GenServer.call(__MODULE__, {:join, pid})
+  def join(pid, opts \\ []),
+    do: GenServer.call(__MODULE__, {:join, pid, Keyword.get(opts, :ghost, false)})
+
+  @doc "How many of the players are ghosts."
+  def ghost_count, do: GenServer.call(__MODULE__, :ghost_count)
 
   @doc "Where `pid` stands, as heard now."
   def move(pid, x, y), do: GenServer.cast(__MODULE__, {:move, pid, x, y, now()})
@@ -61,12 +68,13 @@ defmodule Relay.Hub do
        goat_ms: goat_ms,
        goat_at: now(),
        max: max,
-       monitors: %{}
+       monitors: %{},
+       ghosts: MapSet.new()
      }}
   end
 
   @impl true
-  def handle_call({:join, pid}, _from, state) do
+  def handle_call({:join, pid, ghost}, _from, state) do
     cap = Application.get_env(:relay, :max_players, 300)
 
     if Rooms.count(state.rooms) >= cap and not Rooms.member?(state.rooms, pid) do
@@ -74,13 +82,17 @@ defmodule Relay.Hub do
     else
       {rooms, {room, slot}} = Rooms.join(state.rooms, pid)
       monitors = Map.put_new_lazy(state.monitors, pid, fn -> Process.monitor(pid) end)
-      Stats.count(Rooms.count(rooms))
+      ghosts = if ghost, do: MapSet.put(state.ghosts, pid), else: state.ghosts
+      Stats.count(Rooms.count(rooms) - MapSet.size(ghosts))
 
-      {:reply, {room, slot, state.max}, %{state | rooms: rooms, monitors: monitors}}
+      {:reply, {room, slot, state.max},
+       %{state | rooms: rooms, monitors: monitors, ghosts: ghosts}}
     end
   end
 
   def handle_call(:counts, _from, state), do: {:reply, Rooms.counts(state.rooms), state}
+
+  def handle_call(:ghost_count, _from, state), do: {:reply, MapSet.size(state.ghosts), state}
 
   @impl true
   def handle_cast({:move, pid, x, y, now}, state) do
@@ -130,6 +142,8 @@ defmodule Relay.Hub do
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state), do: {:noreply, drop(state, pid)}
 
   defp drop(state, pid) do
+    state = %{state | ghosts: MapSet.delete(state.ghosts, pid)}
+
     case Map.pop(state.monitors, pid) do
       {nil, _monitors} ->
         %{state | rooms: Rooms.leave(state.rooms, pid)}
