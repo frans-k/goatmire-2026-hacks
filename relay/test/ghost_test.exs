@@ -69,7 +69,8 @@ defmodule Relay.GhostTest do
     assert %{out: true} = :sys.get_state(ghost)
 
     wait_until(fn -> :sys.get_state(ghost).out == false end, 150)
-    assert %{x: 384, y: 384} = :sys.get_state(ghost)
+    %{x: x, y: y} = :sys.get_state(ghost)
+    assert Relay.Level.open?(x, y)
   end
 
   test "ghosts started by Relay.Ghosts are as many as asked for, none for none" do
@@ -80,5 +81,21 @@ defmodule Relay.GhostTest do
 
     start_supervised!({Relay.Ghosts, 0})
     assert Hub.ghost_count() == 0
+  end
+
+  test "a ghost is put on open floor, well away from the goat" do
+    for _try <- 1..200 do
+      {x, y} = Relay.Ghost.place({384, 384})
+
+      assert Relay.Level.open?(x, y)
+      assert (x - 384) * (x - 384) + (y - 384) * (y - 384) >= 6 * 256 * (6 * 256)
+    end
+  end
+
+  test "without a goat it is put on open floor anywhere" do
+    for _try <- 1..50 do
+      {x, y} = Relay.Ghost.place(nil)
+      assert Relay.Level.open?(x, y)
+    end
   end
 end

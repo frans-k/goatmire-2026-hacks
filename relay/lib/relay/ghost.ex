@@ -9,7 +9,9 @@ defmodule Relay.Ghost do
 
   It takes a step a second, in a straight line that now and then turns, and a new way when
   it meets a wall. When the goat catches it, it comes back at the start two seconds later,
-  as a badge does when a key is pressed. If the hub restarts, it joins again.
+  as a badge does when a key is pressed, but somewhere open and well away from the goat, which it
+  knows from the snapshots every player is sent: at the start, where the goat tends to be, it
+  would be caught over and over. If the hub restarts, it joins again.
   """
 
   use GenServer
@@ -21,14 +23,15 @@ defmodule Relay.Ghost do
   @step 128
   # How far from its middle a ghost may not be in a wall, as a badge's body is wide.
   @body 60
-  @start {384, 384}
+  # The goat is not to be this close, in the map's fixed point, where a ghost is put.
+  @away 6 * 256
 
   def start_link(n), do: GenServer.start_link(__MODULE__, n)
 
   @impl true
   def init(n) do
     send(self(), :join)
-    {:ok, %{n: n, x: 0, y: 0, angle: 0, out: false}}
+    {:ok, %{n: n, x: 0, y: 0, angle: 0, out: false, goat: nil}}
   end
 
   @impl true
@@ -39,7 +42,7 @@ defmodule Relay.Ghost do
         {:noreply, state}
 
       _joined ->
-        {x, y} = place()
+        {x, y} = place(state.goat)
         Process.monitor(Hub)
         Process.send_after(self(), :step, 300)
         {:noreply, %{state | x: x, y: y, angle: turn(), out: false}}
@@ -64,7 +67,7 @@ defmodule Relay.Ghost do
   end
 
   def handle_info(:respawn, state) do
-    {x, y} = @start
+    {x, y} = place(state.goat)
     Hub.respawn(self())
     {:noreply, %{state | out: false, x: x, y: y}}
   end
@@ -75,8 +78,13 @@ defmodule Relay.Ghost do
     {:noreply, %{state | out: true}}
   end
 
-  # Snapshots are for badges that draw them.
-  def handle_info({:snap, _frame}, state), do: {:noreply, state}
+  # A ghost draws nothing, and only keeps where the goat is.
+  def handle_info({:snap, frame}, state) do
+    case JSON.decode!(frame) do
+      [_, _, _, "snap", %{"g" => [x, y, _hunting]}] -> {:noreply, %{state | goat: {x, y}}}
+      _no_goat -> {:noreply, %{state | goat: nil}}
+    end
+  end
 
   def handle_info(_other, state), do: {:noreply, state}
 
@@ -100,8 +108,18 @@ defmodule Relay.Ghost do
 
   defp turn, do: :rand.uniform(65_535)
 
-  defp place do
-    Stream.repeatedly(fn -> {:rand.uniform(4095), :rand.uniform(4095)} end)
-    |> Enum.find(fn {x, y} -> Level.open?(x, y) end)
+  @doc false
+  # An open spot at least `@away` from the goat, `{x, y}` or nil.
+  def place(goat) do
+    spots = Stream.repeatedly(fn -> {:rand.uniform(4095), :rand.uniform(4095)} end)
+    open = Stream.filter(spots, fn {x, y} -> Level.open?(x, y) end)
+
+    open |> Stream.filter(&far?(&1, goat)) |> Enum.take(1) |> hd()
+  end
+
+  defp far?(_spot, nil), do: true
+
+  defp far?({x, y}, {gx, gy}) do
+    (x - gx) * (x - gx) + (y - gy) * (y - gy) >= @away * @away
   end
 end
