@@ -44,7 +44,7 @@ defmodule Relay.Router do
 
   get "/stats.json" do
     rooms = Relay.Hub.counts()
-    now = rooms |> Enum.map(fn {_room, n} -> n end) |> Enum.sum()
+    now = (rooms |> Enum.map(fn {_room, n} -> n end) |> Enum.sum()) - Relay.Hub.ghost_count()
 
     body =
       Relay.Stats.snapshot()
@@ -59,14 +59,17 @@ defmodule Relay.Router do
 
   get "/status" do
     rooms = Relay.Hub.counts()
-    total = rooms |> Enum.map(fn {_room, n} -> n end) |> Enum.sum()
+    ghosts = Relay.Hub.ghost_count()
+    total = (rooms |> Enum.map(fn {_room, n} -> n end) |> Enum.sum()) - ghosts
 
-    lines = for {room, n} <- rooms, do: "room #{room}: #{n} playing\n"
+    lines = for {room, n} <- rooms, do: "room #{room}: #{n} in it\n"
+    extra = if ghosts > 0, do: ", and #{ghosts} ghost(s)", else: ""
 
     send_resp(
       conn,
       200,
-      "raycaster relay: #{total} playing in #{length(rooms)} room(s)\n" <> Enum.join(lines)
+      "raycaster relay: #{total} playing#{extra} in #{length(rooms)} room(s)\n" <>
+        Enum.join(lines)
     )
   end
 

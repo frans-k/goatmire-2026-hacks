@@ -26,6 +26,7 @@ Environment variables, read when it starts:
 | `PORT` | the port badges connect to, 4040 |
 | `RELAY_TOKEN` | a token a badge must send as `?token=...`, or anyone may join |
 | `RELAY_MAX` | the most connections at once, in all rooms, 300 |
+| `GHOSTS` | how many players that are not badges wander the map and are hunted by the goat, so someone trying the game alone finds company (0; 2 on Fly). They are in the rooms like badges but left out of the counts of who is playing, and never count as a badge that played |
 | `STATS_PATH` | the file the player counts are kept in, on a volume so a restart keeps them; without it they are counted in memory only |
 | `STATS_UTC_OFFSET_HOURS` | where a day starts, from UTC, 2 |
 
